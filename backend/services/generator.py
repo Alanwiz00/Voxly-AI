@@ -1,0 +1,382 @@
+import json
+from openai import AsyncOpenAI
+from core.config import settings
+from services.sentiment import get_openai
+from services.formatter import format_content, FormattedContent
+
+PLATFORM_INSTRUCTIONS = {
+    "twitter": (
+        "Twitter/X. Audience scrolls fast — lead with a bold hook. "
+        "Use short punchy sentences. Numbers, contrarian takes, and questions perform well. "
+        "For threads: first tweet must standalone as a hook. No corporate speak."
+    ),
+    "instagram": (
+        "Instagram. The first line must stop the scroll before 'more' is tapped. "
+        "Use line breaks for readability. Emojis used sparingly and purposefully. "
+        "End with a question to drive comments. Suggest 10-15 targeted hashtags."
+    ),
+    "facebook": (
+        "Facebook. Conversational and personal tone. Medium length (100-300 words). "
+        "Tell a short story or share an insight. End with a clear call to action or question. "
+        "Avoid overly salesy language."
+    ),
+    "telegram": (
+        "Telegram channel. Readers opted in — they want depth and value. "
+        "Use markdown (*bold*, _italic_) for structure. Can be longer. "
+        "Be direct, informative, and opinionated. End with a key takeaway."
+    ),
+}
+
+CONTENT_TYPE_INSTRUCTIONS = {
+    "idea": (
+        "Generate {count} distinct post ideas. Each must have a different angle, tone, or hook. "
+        "Vary approaches: use data, story, question, contrarian take, list, or analogy. "
+        "Each idea should be ready to post with minimal editing."
+    ),
+    "long_form": (
+        "Write one complete, well-structured long-form post. "
+        "Include: a strong opening hook, 3-5 substantive points with supporting detail, and a memorable closing line."
+    ),
+    "thread": (
+        "Write a Twitter thread of 8-12 tweets. "
+        "Tweet 1: bold hook that makes people want to read on. "
+        "Tweets 2-N: one clear idea per tweet, build progressively. "
+        "Final tweet: strong takeaway or call to action."
+    ),
+    "article": (
+        "Write a complete article with: a compelling title, intro paragraph, "
+        "3-5 sections each with a subheading, and a conclusion with actionable takeaways."
+    ),
+}
+
+
+def _build_system_prompt(platform: str, persona_context: str) -> str:
+    platform_info = PLATFORM_INSTRUCTIONS.get(platform, "a social media platform")
+    persona_block = f"\n\nUser's content persona:\n{persona_context}" if persona_context else ""
+    return (
+        f"You are an expert social media strategist and copywriter. "
+        f"You write for {platform_info}{persona_block}\n\n"
+        "Rules:\n"
+        "- Match the user's established voice, tone, and niche exactly\n"
+        "- Never use filler phrases like 'In today's world', 'It's important to note', or 'Dive into'\n"
+        "- Be specific — use numbers, examples, and concrete details over vague claims\n"
+        "- Write like a human, not a marketing bot\n"
+        "- Always return valid JSON as instructed"
+    )
+
+
+async def generate_post_ideas(
+    topic: str,
+    platform: str,
+    persona_context: str,
+    sentiment_context: str,
+    count: int = 4,
+) -> list[dict]:
+    system = _build_system_prompt(platform, persona_context)
+    user_msg = (
+        f"Topic: {topic}\n\n"
+        f"Current sentiment & trends:\n{sentiment_context or 'No recent data — use your knowledge.'}\n\n"
+        f"Task: {CONTENT_TYPE_INSTRUCTIONS['idea'].format(count=count)}\n\n"
+        f"Return JSON:\n"
+        f'{{"ideas": [{{'
+        f'"title": "short descriptive title",'
+        f'"hook": "the opening line",'
+        f'"body": "full post text",'
+        f'"cta": "call to action (1 sentence)",'
+        f'"hashtags": ["tag1", "tag2"],'
+        f'"score": 8,'
+        f'"score_reason": "why this will perform well"'
+        f"}}]}}"
+    )
+
+    response = await get_openai().chat.completions.create(
+        model=settings.OPENAI_GENERATION_MODEL,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
+        response_format={"type": "json_object"},
+        temperature=0.85,
+        max_tokens=2048,
+    )
+
+    data = json.loads(response.choices[0].message.content)
+    results = []
+    for idea in data.get("ideas", []):
+        body = idea.get("body", "")
+        hashtags = idea.get("hashtags", [])
+        formatted = format_content(platform, body, "idea", hashtags)
+        formatted.meta.update({
+            "title": idea.get("title", ""),
+            "hook": idea.get("hook", ""),
+            "cta": idea.get("cta", ""),
+            "score": idea.get("score", 0),
+            "score_reason": idea.get("score_reason", ""),
+            "hashtags": hashtags,
+        })
+        results.append(formatted)
+    return results
+
+
+async def generate_long_form(
+    topic: str,
+    platform: str,
+    content_type: str,
+    persona_context: str,
+    sentiment_context: str,
+) -> FormattedContent:
+    system = _build_system_prompt(platform, persona_context)
+    instruction = CONTENT_TYPE_INSTRUCTIONS.get(content_type, CONTENT_TYPE_INSTRUCTIONS["long_form"])
+    user_msg = (
+        f"Topic: {topic}\n\n"
+        f"Current sentiment & trends:\n{sentiment_context or 'No recent data — use your knowledge.'}\n\n"
+        f"Task: {instruction}\n\n"
+        f"Return JSON:\n"
+        f'{{"title": "...", "body": "...", "hashtags": ["..."], "score": 8, "score_reason": "..."}}'
+    )
+
+    response = await get_openai().chat.completions.create(
+        model=settings.OPENAI_GENERATION_MODEL,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
+        response_format={"type": "json_object"},
+        temperature=0.75,
+        max_tokens=4096,
+    )
+
+    data = json.loads(response.choices[0].message.content)
+    body = data.get("body", "")
+    hashtags = data.get("hashtags", [])
+    formatted = format_content(platform, body, content_type, hashtags)
+    formatted.meta.update({
+        "title": data.get("title", ""),
+        "score": data.get("score", 0),
+        "score_reason": data.get("score_reason", ""),
+        "hashtags": hashtags,
+    })
+    return formatted
+
+
+async def generate_for_all_platforms(
+    topic: str,
+    content_type: str,
+    persona_context: str,
+    sentiment_context: str,
+) -> dict[str, FormattedContent]:
+    """Generate content adapted for all four platforms in one call."""
+    platforms = ["twitter", "instagram", "facebook", "telegram"]
+    system = (
+        f"You are an expert social media strategist. "
+        f"Given a topic, write platform-native content for all four major platforms in one response.\n\n"
+        f"User persona:\n{persona_context or 'Not specified.'}\n\n"
+        "Rules: each platform version must feel native — not copy-pasted. "
+        "Match each platform's tone, format, and length expectations exactly."
+    )
+    user_msg = (
+        f"Topic: {topic}\n\n"
+        f"Sentiment/trends:\n{sentiment_context or 'Use your knowledge.'}\n\n"
+        f"Content type: {content_type}\n\n"
+        "Return JSON with a key for each platform:\n"
+        '{"twitter": {"body": "...", "score": 8}, '
+        '"instagram": {"body": "...", "hashtags": [...], "score": 8}, '
+        '"facebook": {"body": "...", "score": 8}, '
+        '"telegram": {"body": "...", "score": 8}}'
+    )
+
+    response = await get_openai().chat.completions.create(
+        model=settings.OPENAI_GENERATION_MODEL,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
+        response_format={"type": "json_object"},
+        temperature=0.8,
+        max_tokens=4096,
+    )
+
+    data = json.loads(response.choices[0].message.content)
+    results = {}
+    for platform in platforms:
+        p_data = data.get(platform, {})
+        body = p_data.get("body", "")
+        hashtags = p_data.get("hashtags", [])
+        formatted = format_content(platform, body, content_type, hashtags)
+        formatted.meta.update({
+            "score": p_data.get("score", 0),
+            "hashtags": hashtags,
+        })
+        results[platform] = formatted
+    return results
+
+
+async def generate_reusable_ideas(
+    topic: str,
+    persona_context: str,
+    sentiment_context: str,
+    count: int = 3,
+) -> list[FormattedContent]:
+    """Platform-agnostic short post ideas, reusable across any platform."""
+    persona_block = f"\n\nUser's content persona:\n{persona_context}" if persona_context else ""
+    system = (
+        "You are an expert content strategist. "
+        "Write platform-agnostic content that captures the core message powerfully. "
+        "Content must be reusable — adaptable to Twitter, Instagram, Facebook, or Telegram later. "
+        "Focus on substance: compelling narrative, key insights, concrete data. "
+        "Avoid platform-specific formatting or hashtags."
+        f"{persona_block}\n\n"
+        "Rules:\n"
+        "- No filler phrases like 'In today's world' or 'It's important to note'\n"
+        "- Be specific — use numbers, examples, concrete details\n"
+        "- Write like a knowledgeable human, not a marketing bot\n"
+        "- Always return valid JSON as instructed"
+    )
+    user_msg = (
+        f"Topic: {topic}\n\n"
+        f"Current sentiment & trends:\n{sentiment_context or 'No recent data — use your knowledge.'}\n\n"
+        f"Task: Generate {count} distinct reusable short post ideas. Each must have a different angle, tone, or hook. "
+        "Vary approaches: data, story, question, contrarian take, list, or analogy. "
+        "Each should be 150-300 words — substantive enough to stand alone, concise enough to adapt.\n\n"
+        f"Return JSON:\n"
+        f'{{"ideas": [{{'
+        f'"title": "short descriptive title",'
+        f'"hook": "the opening line",'
+        f'"body": "full post text",'
+        f'"cta": "call to action (1 sentence)",'
+        f'"score": 8,'
+        f'"score_reason": "why this will perform well"'
+        f"}}]}}"
+    )
+
+    response = await get_openai().chat.completions.create(
+        model=settings.OPENAI_GENERATION_MODEL,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
+        response_format={"type": "json_object"},
+        temperature=0.85,
+        max_tokens=2048,
+    )
+
+    data = json.loads(response.choices[0].message.content)
+    results = []
+    for idea in data.get("ideas", []):
+        results.append(FormattedContent(
+            platform="general",
+            content_type="idea",
+            body=idea.get("body", ""),
+            meta={
+                "title": idea.get("title", ""),
+                "hook": idea.get("hook", ""),
+                "cta": idea.get("cta", ""),
+                "score": idea.get("score", 0),
+                "score_reason": idea.get("score_reason", ""),
+            },
+        ))
+    return results
+
+
+async def generate_reusable_longform(
+    topic: str,
+    persona_context: str,
+    sentiment_context: str,
+) -> FormattedContent:
+    """Platform-agnostic long-form post, reusable and adaptable to any platform."""
+    persona_block = f"\n\nUser's content persona:\n{persona_context}" if persona_context else ""
+    system = (
+        "You are an expert content writer. "
+        "Write a comprehensive, platform-agnostic long-form post — the definitive piece on this topic. "
+        "No platform-specific formatting. Focus on thorough, well-structured, engaging content."
+        f"{persona_block}\n\n"
+        "Rules:\n"
+        "- Strong opening hook\n"
+        "- 3-5 substantive points with detail and real examples\n"
+        "- Memorable closing line\n"
+        "- No filler phrases, no corporate speak\n"
+        "- Write like a knowledgeable human\n"
+        "- Always return valid JSON as instructed"
+    )
+    user_msg = (
+        f"Topic: {topic}\n\n"
+        f"Current sentiment & trends:\n{sentiment_context or 'No recent data — use your knowledge.'}\n\n"
+        "Task: Write one complete, platform-agnostic long-form post (500-800 words). "
+        "Structure: strong hook → 3-5 substantive points → memorable close.\n\n"
+        'Return JSON: {"title": "...", "body": "...", "score": 8, "score_reason": "..."}'
+    )
+
+    response = await get_openai().chat.completions.create(
+        model=settings.OPENAI_GENERATION_MODEL,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
+        response_format={"type": "json_object"},
+        temperature=0.75,
+        max_tokens=4096,
+    )
+
+    data = json.loads(response.choices[0].message.content)
+    return FormattedContent(
+        platform="general",
+        content_type="long_form",
+        body=data.get("body", ""),
+        meta={
+            "title": data.get("title", ""),
+            "score": data.get("score", 0),
+            "score_reason": data.get("score_reason", ""),
+        },
+    )
+
+
+async def adapt_to_platform(
+    content: str,
+    title: str,
+    platform: str,
+    persona_context: str,
+) -> FormattedContent:
+    """Rewrite general content natively for a specific platform."""
+    platform_info = PLATFORM_INSTRUCTIONS.get(platform, "a social media platform")
+    persona_block = f"\n\nUser's content persona:\n{persona_context}" if persona_context else ""
+    system = (
+        f"You are an expert social media strategist. "
+        f"Adapt the provided content for {platform_info}{persona_block}\n\n"
+        "Rules:\n"
+        "- Preserve all core ideas and insights\n"
+        "- Reformat natively — match the platform's tone, length, and structure exactly\n"
+        "- Add platform-appropriate elements (hashtags for Instagram, numbered tweets for Twitter threads, etc.)\n"
+        "- Never use filler phrases\n"
+        "- Write like a human, not a marketing bot\n"
+        "- Always return valid JSON as instructed"
+    )
+    user_msg = (
+        f"Original content:\n{content}\n\n"
+        f"Adapt this natively for {platform}. "
+        + (
+            'Return JSON: {"body": "...", "hashtags": ["tag1", "tag2"]}'
+            if platform == "instagram"
+            else 'Return JSON: {"body": "..."}'
+        )
+    )
+
+    response = await get_openai().chat.completions.create(
+        model=settings.OPENAI_GENERATION_MODEL,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
+        response_format={"type": "json_object"},
+        temperature=0.7,
+        max_tokens=2048,
+    )
+
+    data = json.loads(response.choices[0].message.content)
+    body = data.get("body", content)
+    hashtags = data.get("hashtags", [])
+    formatted = format_content(platform, body, "long_form", hashtags)
+    formatted.meta.update({"title": title, "hashtags": hashtags})
+    return formatted
+
+
+async def re_edit_content(original: str, platform: str, instruction: str, persona_context: str) -> str:
+    system = _build_system_prompt(platform, persona_context)
+    user_msg = (
+        f"Original content:\n{original}\n\n"
+        f"Edit instruction: {instruction}\n\n"
+        "Apply the edit while preserving the author's voice and style. "
+        "Only change what the instruction asks for — nothing else. "
+        'Return JSON: {"body": "..."}'
+    )
+
+    response = await get_openai().chat.completions.create(
+        model=settings.OPENAI_GENERATION_MODEL,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
+        response_format={"type": "json_object"},
+        temperature=0.6,
+    )
+
+    data = json.loads(response.choices[0].message.content)
+    return data.get("body", original)

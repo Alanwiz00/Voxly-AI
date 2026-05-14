@@ -1,0 +1,167 @@
+"use client";
+import { useEffect, useState } from "react";
+import { Copy, Check, Pencil, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { toast } from "sonner";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { contentApi, type GeneratedContent, type Platform, type ContentType } from "@/lib/api";
+import { PLATFORM_LABELS, PLATFORM_COLORS, CONTENT_TYPE_LABELS, cn } from "@/lib/utils";
+
+export default function HistoryPage() {
+  const [items, setItems] = useState<GeneratedContent[]>([]);
+  const [platformFilter, setPlatformFilter] = useState<Platform | "">("");
+  const [typeFilter, setTypeFilter] = useState<ContentType | "">("");
+  const [copied, setCopied] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editInstruction, setEditInstruction] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  const load = () =>
+    contentApi
+      .list({ platform: platformFilter || undefined, content_type: typeFilter || undefined, limit: 50 })
+      .then((r) => setItems(r.data));
+
+  useEffect(() => { load(); }, [platformFilter, typeFilter]);
+
+  const copy = async (id: number, text: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopied(id);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const reEdit = async (item: GeneratedContent) => {
+    if (!editInstruction.trim()) return;
+    setEditLoading(true);
+    try {
+      const res = await contentApi.reEdit(item.id, editInstruction);
+      setItems((prev) => [res.data, ...prev]);
+      setEditingId(null);
+      setEditInstruction("");
+      toast.success("New version created");
+    } catch {
+      toast.error("Re-edit failed");
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const remove = async (id: number) => {
+    await contentApi.delete(id);
+    setItems((prev) => prev.filter((i) => i.id !== id));
+    toast.success("Deleted");
+  };
+
+  return (
+    <div className="p-8 space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold text-slate-900">Content History</h1>
+        <p className="text-slate-500 mt-1">All generated content — re-edit any piece with instructions</p>
+      </div>
+
+      {/* Filters */}
+      <div className="flex gap-3">
+        <select
+          value={platformFilter}
+          onChange={(e) => setPlatformFilter(e.target.value as Platform | "")}
+          className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+        >
+          <option value="">All Platforms</option>
+          {(["twitter", "instagram", "facebook", "telegram"] as Platform[]).map((p) => (
+            <option key={p} value={p}>{PLATFORM_LABELS[p]}</option>
+          ))}
+        </select>
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value as ContentType | "")}
+          className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+        >
+          <option value="">All Types</option>
+          {(["idea", "long_form", "thread", "article"] as ContentType[]).map((t) => (
+            <option key={t} value={t}>{CONTENT_TYPE_LABELS[t]}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-3">
+        {items.length === 0 && (
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              No content yet. Head to <strong>Generate</strong> to create your first post.
+            </CardContent>
+          </Card>
+        )}
+
+        {items.map((item) => (
+          <Card key={item.id}>
+            <CardHeader className="pb-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge className={PLATFORM_COLORS[item.platform]}>{PLATFORM_LABELS[item.platform]}</Badge>
+                    <Badge variant="outline">{CONTENT_TYPE_LABELS[item.content_type]}</Badge>
+                    {item.version > 1 && <Badge variant="secondary">v{item.version}</Badge>}
+                    {item.parent_id && <Badge variant="outline" className="text-indigo-600">Re-edit</Badge>}
+                  </div>
+                  {item.title && <p className="font-medium mt-1 truncate">{item.title}</p>}
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {new Date(item.created_at).toLocaleString()}
+                  </p>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <Button variant="ghost" size="icon" onClick={() => copy(item.id, item.content)}>
+                    {copied === item.id ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => { setEditingId(editingId === item.id ? null : item.id); setEditInstruction(""); }}
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}>
+                    {expandedId === item.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => remove(item.id)}>
+                    <Trash2 className="w-4 h-4 text-destructive" />
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+
+            {expandedId === item.id && (
+              <CardContent className="pt-0">
+                <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed bg-slate-50 rounded-md p-4">
+                  {item.content}
+                </pre>
+              </CardContent>
+            )}
+
+            {editingId === item.id && (
+              <CardContent className="pt-0 border-t">
+                <div className="space-y-2 pt-3">
+                  <p className="text-sm font-medium">Re-edit instruction</p>
+                  <Textarea
+                    placeholder="e.g. Make it shorter and more casual, add a CTA at the end..."
+                    rows={2}
+                    value={editInstruction}
+                    onChange={(e) => setEditInstruction(e.target.value)}
+                  />
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => reEdit(item)} disabled={editLoading || !editInstruction.trim()}>
+                      {editLoading ? "Editing..." : "Apply Edit"}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
+                  </div>
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
