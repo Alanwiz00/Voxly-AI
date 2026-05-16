@@ -13,8 +13,18 @@ services:
     restart: always
     ports:
       - "8000:8000"
-    env_file: ./backend/.env
     environment:
+      - APP_ENV=production
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - ADMIN_EMAILS=${ADMIN_EMAILS}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       redis:
@@ -29,8 +39,17 @@ services:
   celery-worker:
     build: ./backend
     restart: always
-    env_file: ./backend/.env
     environment:
+      - APP_ENV=production
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - ADMIN_EMAILS=${ADMIN_EMAILS}
       - REDIS_URL=redis://redis:6379/0
       - PYTHONPATH=/app
     depends_on:
@@ -41,8 +60,17 @@ services:
   celery-beat:
     build: ./backend
     restart: always
-    env_file: ./backend/.env
     environment:
+      - APP_ENV=production
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - ADMIN_EMAILS=${ADMIN_EMAILS}
       - REDIS_URL=redis://redis:6379/0
       - PYTHONPATH=/app
     depends_on:
@@ -55,9 +83,13 @@ services:
     restart: always
     ports:
       - "3000:3000"
-    env_file: ./frontend/.env
     environment:
       - NODE_ENV=production
+      - NEXTAUTH_URL=${NEXTAUTH_URL}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
       - INTERNAL_API_URL=http://backend:8000
     depends_on:
       backend:
