@@ -113,7 +113,7 @@ voxlyai/
 └── docker-compose.prod.yml # Production
 ```
 
-# AI image generator prompt (Midjourney / Ideogram / DALL-E):
+# git AI image generator prompt (Midjourney / Ideogram / DALL-E):
 Minimal flat logo icon for "VoxlyAI", an AI voice and content generation brand.
 Design: five vertical pill-shaped bars arranged in a symmetric arch — shortest
 on the outside, tallest in the center — representing a sound waveform or voice
