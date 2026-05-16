@@ -1,19 +1,19 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import type { Session } from "next-auth";
+import { authConfig } from "./auth.config";
 
 // Server-side calls go via the internal Docker network URL, not localhost
 const INTERNAL_API = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  ...authConfig,
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     }),
   ],
-  secret: process.env.NEXTAUTH_SECRET,
-  session: { strategy: "jwt" },
   callbacks: {
     async signIn({ user }) {
       const email = user.email;
@@ -26,7 +26,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         );
         return res.ok;
       } catch {
-        // Backend unreachable — deny sign-in to fail secure
         return false;
       }
     },
