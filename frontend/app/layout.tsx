@@ -7,8 +7,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Content Generator",
-  description: "AI-powered social media content generator",
+  title: "VoxlyAI",
+  description: "Your voice, amplified. AI-generated content that sounds like you — across every platform.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

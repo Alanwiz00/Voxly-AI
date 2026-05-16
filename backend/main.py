@@ -35,6 +35,7 @@ async def _migrate_db() -> None:
         for stmt in [
             "ALTER TABLE persona_profiles ADD COLUMN IF NOT EXISTS learned_style TEXT",
             "ALTER TABLE persona_profiles ADD COLUMN IF NOT EXISTS style_synthesized_at TIMESTAMPTZ",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
         ]:
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
@@ -42,16 +43,19 @@ async def _migrate_db() -> None:
 async def _seed_admin_emails() -> None:
     if not settings.ADMIN_EMAILS.strip():
         return
-    from sqlalchemy import select
+    from sqlalchemy import select, update
     from db.postgres import AsyncSessionLocal
-    from db.models.user import AllowedEmail
+    from db.models.user import AllowedEmail, User
 
     emails = [e.strip() for e in settings.ADMIN_EMAILS.split(",") if e.strip()]
     async with AsyncSessionLocal() as db:
         for email in emails:
+            # Ensure email is in the allowlist
             exists = await db.execute(select(AllowedEmail).where(AllowedEmail.email == email))
             if not exists.scalar_one_or_none():
                 db.add(AllowedEmail(email=email, added_by="system"))
+            # If the user already exists, make sure they have is_admin=True
+            await db.execute(update(User).where(User.email == email).values(is_admin=True))
         await db.commit()
 
 

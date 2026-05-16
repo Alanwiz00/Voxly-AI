@@ -22,10 +22,8 @@ export default function Sidebar() {
     <aside className="w-60 min-h-screen bg-slate-900 text-slate-100 flex flex-col">
       <div className="p-6 border-b border-slate-700">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center">
-            <Sparkles className="w-4 h-4 text-white" />
-          </div>
-          <span className="font-bold text-lg">ContentAI</span>
+          <img src="/logo.svg" alt="VoxlyAI" className="w-8 h-8" />
+          <span className="font-bold text-lg">VoxlyAI</span>
         </div>
       </div>
 

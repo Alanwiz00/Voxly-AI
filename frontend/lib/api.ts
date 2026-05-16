@@ -113,8 +113,15 @@ export const personaApi = {
 };
 
 // Users / allowed emails
+export interface CurrentUser {
+  id: number;
+  email: string;
+  name: string | null;
+  is_admin: boolean;
+}
+
 export const usersApi = {
-  me: () => api.get("/users/me"),
+  me: () => api.get<CurrentUser>("/users/me"),
   listAllowedEmails: () => api.get("/users/allowed-emails"),
   addAllowedEmail: (email: string) => api.post("/users/allowed-emails", { email }),
   removeAllowedEmail: (email: string) => api.delete(`/users/allowed-emails/${email}`),

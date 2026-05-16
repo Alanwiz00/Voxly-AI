@@ -12,12 +12,18 @@ export default function SettingsPage() {
   const [persona, setPersona] = useState<Partial<Persona>>({});
   const [saving, setSaving] = useState(false);
   const [synthesizing, setSynthesizing] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [allowedEmails, setAllowedEmails] = useState<{ id: number; email: string }[]>([]);
   const [newEmail, setNewEmail] = useState("");
 
   useEffect(() => {
     personaApi.get().then((r) => { if (r.data) setPersona(r.data); });
-    usersApi.listAllowedEmails().then((r) => setAllowedEmails(r.data));
+    usersApi.me().then((r) => {
+      if (r.data.is_admin) {
+        setIsAdmin(true);
+        usersApi.listAllowedEmails().then((res) => setAllowedEmails(res.data));
+      }
+    });
   }, []);
 
   const savePersona = async () => {
@@ -195,8 +201,8 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Access control */}
-      <Card>
+      {/* Access control — admin only */}
+      {isAdmin && <Card>
         <CardHeader>
           <CardTitle>Authorized Emails</CardTitle>
           <CardDescription>Only listed emails can sign in. Your email is always allowed.</CardDescription>
@@ -230,7 +236,7 @@ export default function SettingsPage() {
             )}
           </div>
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   );
 }
