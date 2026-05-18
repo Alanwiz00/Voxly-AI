@@ -36,6 +36,11 @@ async def _migrate_db() -> None:
             "ALTER TABLE persona_profiles ADD COLUMN IF NOT EXISTS learned_style TEXT",
             "ALTER TABLE persona_profiles ADD COLUMN IF NOT EXISTS style_synthesized_at TIMESTAMPTZ",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE persona_profiles ADD COLUMN IF NOT EXISTS name VARCHAR(255) DEFAULT 'Default'",
+            "ALTER TABLE persona_profiles ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE persona_profiles DROP CONSTRAINT IF EXISTS persona_profiles_user_id_key",
+            # Mark existing single personas as default
+            "UPDATE persona_profiles SET is_default = TRUE WHERE is_default = FALSE",
         ]:
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

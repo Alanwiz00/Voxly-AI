@@ -17,7 +17,7 @@ from db.models.content import GeneratedContent
 from db.qdrant import upsert_points, delete_by_payload
 from services.crawl import crawl_topic
 from services.sentiment import summarize_and_analyze, get_embeddings
-from services.persona import get_persona_context
+from services.persona import get_best_persona_context
 from services.generator import generate_reusable_ideas, generate_reusable_longform
 
 celery_app = Celery("content_generator", broker=settings.REDIS_URL, backend=settings.REDIS_URL)
@@ -130,7 +130,7 @@ async def _generate_reusable_for_topic(
         for r in crawl_records
         if r.content_summary
     )
-    persona_context = await get_persona_context(user_id, topic_name)
+    persona_context = await get_best_persona_context(user_id, topic_name)
 
     ideas = await generate_reusable_ideas(
         topic=topic_name,

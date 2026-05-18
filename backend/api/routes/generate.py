@@ -8,9 +8,9 @@ from db.models.persona import PersonaProfile
 from db.models.content import GeneratedContent
 from db.qdrant import search_points
 from services.sentiment import get_embeddings
-from services.persona import get_persona_context
+from services.persona import get_best_persona_context
 from services.generator import generate_post_ideas, generate_long_form, generate_for_all_platforms
-from services.ingest import ingest
+from services.ingest import ingest, IMAGE_EXTENSIONS, IMAGE_MIME_TYPES
 from core.config import settings
 
 router = APIRouter(prefix="/generate", tags=["generate"])
@@ -63,7 +63,7 @@ async def generate(body: GenerateRequest, current_user: CurrentUser, db: DB):
             raise HTTPException(status_code=404, detail="Topic not found")
         topic_name = topic.name
 
-    persona_context = await get_persona_context(current_user.id, topic_name)
+    persona_context = await get_best_persona_context(current_user.id, topic_name)
     sentiment_context = await _get_sentiment_context(topic_id, topic_name, current_user.id)
 
     if body.content_type == "idea":
@@ -130,18 +130,24 @@ async def generate_from_source(
 ):
     file_bytes = await file.read() if file else None
     file_type = None
+    mime_type = None
     if file:
-        if file.filename.endswith(".pdf"):
+        import os
+        ext = os.path.splitext(file.filename or "")[1].lower()
+        if ext == ".pdf":
             file_type = "pdf"
-        elif file.filename.endswith(".docx"):
+        elif ext == ".docx":
             file_type = "docx"
+        elif ext in IMAGE_EXTENSIONS:
+            file_type = "image"
+            mime_type = IMAGE_MIME_TYPES.get(ext, "image/jpeg")
 
-    source_text = await ingest(text=text, file_bytes=file_bytes, file_type=file_type, url=url)
+    source_text = await ingest(text=text, file_bytes=file_bytes, file_type=file_type, mime_type=mime_type, url=url)
     if not source_text:
         raise HTTPException(status_code=400, detail="Could not extract content from the provided source.")
 
     topic_name = f"Custom source ({(url or file.filename if file else 'text')[:60]})"
-    persona_context = await get_persona_context(current_user.id, topic_name)
+    persona_context = await get_best_persona_context(current_user.id, topic_name)
 
     if content_type == "idea":
         formatted_list = await generate_post_ideas(
@@ -211,7 +217,7 @@ async def generate_batch(body: BatchGenerateRequest, current_user: CurrentUser, 
             raise HTTPException(status_code=404, detail="Topic not found")
         topic_name = topic.name
 
-    persona_context = await get_persona_context(current_user.id, topic_name)
+    persona_context = await get_best_persona_context(current_user.id, topic_name)
     sentiment_context = await _get_sentiment_context(body.topic_id, topic_name, current_user.id)
 
     platform_results = await generate_for_all_platforms(

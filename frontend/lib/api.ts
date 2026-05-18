@@ -57,6 +57,8 @@ export interface GeneratedContent {
 
 export interface Persona {
   id: number;
+  name: string;
+  is_default: boolean;
   niche: string | null;
   target_audience: string | null;
   tone: string | null;
@@ -107,9 +109,12 @@ export const contentApi = {
 
 // Persona
 export const personaApi = {
-  get: () => api.get<Persona | null>("/persona/"),
-  upsert: (data: Partial<Persona>) => api.put<Persona>("/persona/", data),
-  synthesizeStyle: () => api.post<Persona>("/persona/synthesize-style"),
+  list: () => api.get<Persona[]>("/persona/"),
+  create: (data: Partial<Persona> & { name: string }) => api.post<Persona>("/persona/", data),
+  update: (id: number, data: Partial<Persona>) => api.put<Persona>(`/persona/${id}`, data),
+  delete: (id: number) => api.delete(`/persona/${id}`),
+  setDefault: (id: number) => api.post<Persona>(`/persona/${id}/set-default`),
+  synthesizeStyle: (id: number) => api.post<Persona>(`/persona/${id}/synthesize-style`),
 };
 
 // Users / allowed emails

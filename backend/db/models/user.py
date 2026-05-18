@@ -24,7 +24,7 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    persona: Mapped["PersonaProfile | None"] = relationship(back_populates="user", uselist=False)
+    personas: Mapped[list["PersonaProfile"]] = relationship(back_populates="user")
     topics: Mapped[list["Topic"]] = relationship(back_populates="user")
     contents: Mapped[list["GeneratedContent"]] = relationship(back_populates="user")
 

@@ -82,7 +82,7 @@ async def synthesize_user_style(user_id: int) -> str | None:
     return data.get("style_summary") or None
 
 
-async def run_synthesis_and_save(user_id: int) -> str | None:
+async def run_synthesis_and_save(user_id: int, persona_id: int | None = None) -> str | None:
     """
     Full pipeline: synthesize style → save to DB → re-embed persona.
     Returns the new style summary, or None if skipped.
@@ -97,12 +97,26 @@ async def run_synthesis_and_save(user_id: int) -> str | None:
         return None
 
     async with AsyncSessionLocal() as db:
-        result = await db.execute(select(PersonaProfile).where(PersonaProfile.user_id == user_id))
-        profile = result.scalar_one_or_none()
+        # Target a specific persona or fall back to the default / first
+        if persona_id:
+            result = await db.execute(
+                select(PersonaProfile).where(PersonaProfile.id == persona_id, PersonaProfile.user_id == user_id)
+            )
+            profile = result.scalar_one_or_none()
+        else:
+            result = await db.execute(
+                select(PersonaProfile)
+                .where(PersonaProfile.user_id == user_id)
+                .order_by(PersonaProfile.is_default.desc(), PersonaProfile.created_at.asc())
+                .limit(1)
+            )
+            profile = result.scalar_one_or_none()
 
         if profile is None:
             profile = PersonaProfile(
                 user_id=user_id,
+                name="Default",
+                is_default=True,
                 learned_style=style_summary,
                 style_synthesized_at=datetime.now(timezone.utc),
             )
@@ -122,6 +136,7 @@ async def run_synthesis_and_save(user_id: int) -> str | None:
             writing_style_notes=profile.writing_style_notes,
             sample_content=profile.sample_content,
         )
+        saved_persona_id = profile.id
 
-    await embed_persona(user_id, persona_data, learned_style=style_summary)
+    await embed_persona(saved_persona_id, user_id, persona_data, learned_style=style_summary)
     return style_summary

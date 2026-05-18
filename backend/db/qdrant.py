@@ -32,6 +32,13 @@ async def ensure_collections() -> None:
             field_schema=PayloadSchemaType.INTEGER,
         )
 
+    # persona_id index for per-persona embed/delete
+    await client.create_payload_index(
+        collection_name=settings.PERSONA_COLLECTION,
+        field_name="persona_id",
+        field_schema=PayloadSchemaType.INTEGER,
+    )
+
     # topic_sentiment also filters on topic_id
     await client.create_payload_index(
         collection_name=settings.SENTIMENT_COLLECTION,

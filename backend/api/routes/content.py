@@ -4,7 +4,7 @@ from sqlalchemy import select, desc, func
 from api.deps import CurrentUser, DB
 from db.models.content import GeneratedContent, ContentVersion
 from services.generator import re_edit_content, adapt_to_platform
-from services.persona import get_persona_context
+from services.persona import get_best_persona_context
 
 router = APIRouter(prefix="/content", tags=["content"])
 
@@ -68,7 +68,7 @@ async def re_edit(content_id: int, body: ReEditRequest, background_tasks: Backgr
     if not original:
         raise HTTPException(status_code=404, detail="Content not found")
 
-    persona_context = await get_persona_context(current_user.id, original.title or original.content[:100])
+    persona_context = await get_best_persona_context(current_user.id, original.title or original.content[:100])
     new_body = await re_edit_content(original.content, original.platform, body.instruction, persona_context)
 
     # Save as a new version linked to original
@@ -134,7 +134,7 @@ async def adapt_content(content_id: int, body: AdaptRequest, current_user: Curre
     if not original:
         raise HTTPException(status_code=404, detail="Content not found")
 
-    persona_context = await get_persona_context(current_user.id, original.title or original.content[:100])
+    persona_context = await get_best_persona_context(current_user.id, original.title or original.content[:100])
     formatted = await adapt_to_platform(
         content=original.content,
         title=original.title or "",

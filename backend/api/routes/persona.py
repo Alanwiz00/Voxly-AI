@@ -11,6 +11,8 @@ router = APIRouter(prefix="/persona", tags=["persona"])
 
 class PersonaResponse(BaseModel):
     id: int
+    name: str
+    is_default: bool
     niche: str | None
     target_audience: str | None
     tone: str | None
@@ -26,6 +28,8 @@ class PersonaResponse(BaseModel):
     def from_orm_ext(cls, p: PersonaProfile) -> "PersonaResponse":
         return cls(
             id=p.id,
+            name=p.name or "Default",
+            is_default=p.is_default or False,
             niche=p.niche,
             target_audience=p.target_audience,
             tone=p.tone,
@@ -37,43 +41,117 @@ class PersonaResponse(BaseModel):
         )
 
 
-@router.get("/", response_model=PersonaResponse | None)
-async def get_persona(current_user: CurrentUser, db: DB):
-    result = await db.execute(select(PersonaProfile).where(PersonaProfile.user_id == current_user.id))
-    profile = result.scalar_one_or_none()
-    return PersonaResponse.from_orm_ext(profile) if profile else None
+class PersonaCreate(PersonaData):
+    name: str = "Default"
 
 
-@router.put("/", response_model=PersonaResponse)
-async def upsert_persona(body: PersonaData, current_user: CurrentUser, db: DB):
-    result = await db.execute(select(PersonaProfile).where(PersonaProfile.user_id == current_user.id))
+class PersonaUpdate(PersonaData):
+    name: str | None = None
+
+
+@router.get("/", response_model=list[PersonaResponse])
+async def list_personas(current_user: CurrentUser, db: DB):
+    result = await db.execute(
+        select(PersonaProfile)
+        .where(PersonaProfile.user_id == current_user.id)
+        .order_by(PersonaProfile.is_default.desc(), PersonaProfile.created_at.asc())
+    )
+    return [PersonaResponse.from_orm_ext(p) for p in result.scalars().all()]
+
+
+@router.post("/", response_model=PersonaResponse, status_code=201)
+async def create_persona(body: PersonaCreate, current_user: CurrentUser, db: DB):
+    # If this is the user's first persona, make it default automatically
+    existing = await db.execute(select(PersonaProfile).where(PersonaProfile.user_id == current_user.id))
+    is_first = existing.scalar_one_or_none() is None
+
+    persona = PersonaProfile(
+        user_id=current_user.id,
+        name=body.name,
+        is_default=is_first,
+        **{k: v for k, v in body.model_dump(exclude={"name"}).items() if v is not None},
+    )
+    db.add(persona)
+    await db.commit()
+    await db.refresh(persona)
+
+    data = PersonaData(**body.model_dump(exclude={"name"}))
+    await embed_persona(persona.id, current_user.id, data)
+    return PersonaResponse.from_orm_ext(persona)
+
+
+@router.put("/{persona_id}", response_model=PersonaResponse)
+async def update_persona(persona_id: int, body: PersonaUpdate, current_user: CurrentUser, db: DB):
+    result = await db.execute(
+        select(PersonaProfile).where(PersonaProfile.id == persona_id, PersonaProfile.user_id == current_user.id)
+    )
     persona = result.scalar_one_or_none()
+    if not persona:
+        raise HTTPException(status_code=404, detail="Persona not found")
 
-    if persona is None:
-        persona = PersonaProfile(user_id=current_user.id, **body.model_dump(exclude_none=True))
-        db.add(persona)
-    else:
-        for k, v in body.model_dump(exclude_none=True).items():
-            setattr(persona, k, v)
+    for k, v in body.model_dump(exclude_none=True).items():
+        setattr(persona, k, v)
 
     await db.commit()
     await db.refresh(persona)
 
-    # Re-embed keeping any existing learned style intact
-    await embed_persona(current_user.id, body, learned_style=persona.learned_style)
+    data = PersonaData(**{f: getattr(persona, f) for f in PersonaData.model_fields})
+    await embed_persona(persona.id, current_user.id, data, learned_style=persona.learned_style)
     return PersonaResponse.from_orm_ext(persona)
 
 
-@router.post("/synthesize-style", response_model=PersonaResponse)
-async def synthesize_style(current_user: CurrentUser, db: DB):
-    """Run a full style synthesis pass over edit history and update the persona."""
-    style_summary = await run_synthesis_and_save(current_user.id)
-    if style_summary is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Not enough edit history yet — make at least 3 re-edits first.",
-        )
+@router.delete("/{persona_id}", status_code=204)
+async def delete_persona(persona_id: int, current_user: CurrentUser, db: DB):
+    result = await db.execute(
+        select(PersonaProfile).where(PersonaProfile.id == persona_id, PersonaProfile.user_id == current_user.id)
+    )
+    persona = result.scalar_one_or_none()
+    if not persona:
+        raise HTTPException(status_code=404, detail="Persona not found")
+    if persona.is_default:
+        raise HTTPException(status_code=400, detail="Cannot delete the default persona. Set another as default first.")
 
-    result = await db.execute(select(PersonaProfile).where(PersonaProfile.user_id == current_user.id))
-    profile = result.scalar_one_or_none()
-    return PersonaResponse.from_orm_ext(profile)
+    from db.qdrant import delete_by_payload
+    from core.config import settings
+    await delete_by_payload(settings.PERSONA_COLLECTION, "persona_id", persona_id)
+
+    await db.delete(persona)
+    await db.commit()
+
+
+@router.post("/{persona_id}/set-default", response_model=PersonaResponse)
+async def set_default_persona(persona_id: int, current_user: CurrentUser, db: DB):
+    # Unset all defaults for this user
+    all_personas = await db.execute(
+        select(PersonaProfile).where(PersonaProfile.user_id == current_user.id)
+    )
+    for p in all_personas.scalars().all():
+        p.is_default = p.id == persona_id
+
+    result = await db.execute(
+        select(PersonaProfile).where(PersonaProfile.id == persona_id, PersonaProfile.user_id == current_user.id)
+    )
+    persona = result.scalar_one_or_none()
+    if not persona:
+        raise HTTPException(status_code=404, detail="Persona not found")
+
+    await db.commit()
+    await db.refresh(persona)
+    return PersonaResponse.from_orm_ext(persona)
+
+
+@router.post("/{persona_id}/synthesize-style", response_model=PersonaResponse)
+async def synthesize_style(persona_id: int, current_user: CurrentUser, db: DB):
+    result = await db.execute(
+        select(PersonaProfile).where(PersonaProfile.id == persona_id, PersonaProfile.user_id == current_user.id)
+    )
+    persona = result.scalar_one_or_none()
+    if not persona:
+        raise HTTPException(status_code=404, detail="Persona not found")
+
+    style_summary = await run_synthesis_and_save(current_user.id, persona_id)
+    if style_summary is None:
+        raise HTTPException(status_code=400, detail="Not enough edit history yet — make at least 3 re-edits first.")
+
+    await db.refresh(persona)
+    return PersonaResponse.from_orm_ext(persona)

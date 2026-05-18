@@ -223,19 +223,48 @@ export default function GeneratePage() {
               )}
 
               {sourceMode === "file" && (
-                <div
-                  className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:bg-accent transition-colors"
-                  onClick={() => fileRef.current?.click()}
-                >
-                  <input ref={fileRef} type="file" accept=".pdf,.docx" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-                  <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                  {file ? (
-                    <p className="text-sm font-medium">{file.name}</p>
-                  ) : (
-                    <>
-                      <p className="text-sm font-medium">Drop PDF or DOCX here</p>
-                      <p className="text-xs text-muted-foreground mt-1">or click to browse</p>
-                    </>
+                <div className="space-y-3">
+                  <div
+                    className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:bg-accent transition-colors"
+                    onClick={() => fileRef.current?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); setFile(e.dataTransfer.files?.[0] || null); }}
+                  >
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      accept=".pdf,.docx,.jpg,.jpeg,.png,.webp,.gif,.bmp"
+                      className="hidden"
+                      onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    />
+                    {file && file.type.startsWith("image/") ? (
+                      <div className="space-y-2">
+                        <img
+                          src={URL.createObjectURL(file)}
+                          alt="preview"
+                          className="max-h-48 mx-auto rounded-md object-contain"
+                        />
+                        <p className="text-sm font-medium">{file.name}</p>
+                        <p className="text-xs text-muted-foreground">Click to change</p>
+                      </div>
+                    ) : file ? (
+                      <div className="space-y-1">
+                        <FileText className="w-8 h-8 text-indigo-500 mx-auto" />
+                        <p className="text-sm font-medium">{file.name}</p>
+                        <p className="text-xs text-muted-foreground">Click to change</p>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                        <p className="text-sm font-medium">Drop a file here or click to browse</p>
+                        <p className="text-xs text-muted-foreground mt-1">PDF · DOCX · JPG · PNG · WEBP · GIF</p>
+                      </>
+                    )}
+                  </div>
+                  {file && file.type.startsWith("image/") && (
+                    <p className="text-xs text-indigo-600 bg-indigo-50 rounded px-3 py-2">
+                      GPT-4o Vision will extract text, data, and context from this image
+                    </p>
                   )}
                 </div>
               )}
