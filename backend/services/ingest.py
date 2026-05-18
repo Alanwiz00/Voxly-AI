@@ -44,7 +44,7 @@ async def extract_from_image(file_bytes: bytes, mime_type: str) -> str:
     """
     b64 = base64.b64encode(file_bytes).decode("utf-8")
     response = await get_openai().chat.completions.create(
-        model=settings.OPENAI_MODEL,
+        model=settings.OPENAI_GENERATION_MODEL,
         messages=[
             {
                 "role": "user",
