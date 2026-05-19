@@ -82,8 +82,8 @@ export default function GeneratePage() {
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-2xl md:text-3xl font-bold text-slate-900">Generate Content</h1>
-        <p className="text-slate-500 mt-1">Create platform-ready content from topics or your own source</p>
+        <h1 className="text-2xl md:text-3xl font-bold text-foreground">Generate Content</h1>
+        <p className="text-muted-foreground mt-1">Create platform-ready content from topics or your own source</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -320,18 +320,18 @@ export default function GeneratePage() {
                   </Button>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed bg-slate-50 rounded-md p-3">
+                  <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed text-foreground bg-muted/50 rounded-md p-3">
                     {item.content}
                   </pre>
                   {cta && (
-                    <p className="text-xs text-indigo-700 bg-indigo-50 rounded px-3 py-1.5">
+                    <p className="text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 rounded px-3 py-1.5">
                       <span className="font-semibold">CTA:</span> {cta}
                     </p>
                   )}
                   {hashtags.length > 0 && (
                     <div className="flex flex-wrap gap-1">
                       {hashtags.map((tag) => (
-                        <span key={tag} className="text-xs text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                        <span key={tag} className="text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-1.5 py-0.5 rounded">
                           #{tag}
                         </span>
                       ))}
