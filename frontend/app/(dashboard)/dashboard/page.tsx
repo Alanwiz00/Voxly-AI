@@ -18,14 +18,14 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-4 md:p-8 space-y-6 md:space-y-8">
       <div>
-        <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900">Dashboard</h1>
         <p className="text-slate-500 mt-1">Overview of your content generation activity</p>
       </div>
 
       {/* Quick stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-3">
@@ -72,7 +72,7 @@ export default function DashboardPage() {
         <CardHeader>
           <CardTitle>Quick Actions</CardTitle>
         </CardHeader>
-        <CardContent className="flex gap-3">
+        <CardContent className="flex flex-wrap gap-3">
           <Button asChild>
             <Link href="/generate">
               <Sparkles className="w-4 h-4 mr-2" />
@@ -88,7 +88,7 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Topics status */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">

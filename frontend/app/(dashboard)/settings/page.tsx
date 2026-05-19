@@ -32,7 +32,7 @@ function PersonaForm({
         <label className="text-sm font-medium">Persona Name</label>
         <Input placeholder="e.g. Tech Founder, Health Coach, LinkedIn Pro" value={form.name || ""} onChange={set("name")} />
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-1">
           <label className="text-sm font-medium">Niche / Industry</label>
           <Input placeholder="e.g. SaaS, Healthcare, Fitness" value={form.niche || ""} onChange={set("niche")} />
@@ -234,9 +234,9 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="p-8 space-y-8 max-w-3xl">
+    <div className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-3xl">
       <div>
-        <h1 className="text-3xl font-bold text-slate-900">Settings</h1>
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900">Settings</h1>
         <p className="text-slate-500 mt-1">Manage your personas and access control</p>
       </div>
 

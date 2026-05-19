@@ -116,15 +116,15 @@ export default function CrawlerPage() {
     setActiveTab((prev) => ({ ...prev, [topicId]: tab }));
 
   return (
-    <div className="p-8 space-y-6 max-w-4xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Crawler</h1>
-          <p className="text-slate-500 mt-1">
+    <div className="p-4 md:p-8 space-y-6 max-w-4xl">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground">Crawler</h1>
+          <p className="text-muted-foreground mt-1 text-sm">
             Topics are crawled every 6 hours — fresh content is auto-generated after each crawl
           </p>
         </div>
-        <Button onClick={() => setShowForm(!showForm)}>
+        <Button onClick={() => setShowForm(!showForm)} className="shrink-0">
           <Plus className="w-4 h-4 mr-2" />
           Add Topic
         </Button>
@@ -178,54 +178,68 @@ export default function CrawlerPage() {
 
           return (
             <Card key={topic.id} className="overflow-hidden">
-              {/* Topic header row */}
-              <CardContent className="py-4 flex items-center gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{topic.name}</span>
+              {/* Topic card — stacked for mobile */}
+              <CardContent className="py-4 space-y-3">
+                {/* Name + badge + delete */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap min-w-0">
+                    <span className="font-semibold text-foreground leading-snug">{topic.name}</span>
                     {topic.is_active && <Badge variant="secondary">Active</Badge>}
                   </div>
-                  {topic.keywords && (
-                    <p className="text-sm text-muted-foreground mt-0.5">
-                      Keywords: {topic.keywords}
-                    </p>
-                  )}
-                  <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
-                    <Clock className="w-3 h-3" />
-                    {topic.last_crawled_at
-                      ? `Last crawled: ${new Date(topic.last_crawled_at).toLocaleString()}`
-                      : "Not yet crawled"}
-                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0 -mt-1 -mr-2 h-8 w-8"
+                    onClick={() => remove(topic.id)}
+                  >
+                    <Trash2 className="w-4 h-4 text-destructive" />
+                  </Button>
                 </div>
-                <div className="flex gap-2 shrink-0">
+
+                {/* Keywords */}
+                {topic.keywords && (
+                  <p className="text-sm text-muted-foreground leading-snug">
+                    <span className="font-medium">Keywords:</span> {topic.keywords}
+                  </p>
+                )}
+
+                {/* Last crawled */}
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Clock className="w-3 h-3 flex-shrink-0" />
+                  {topic.last_crawled_at
+                    ? `Last crawled: ${new Date(topic.last_crawled_at).toLocaleString()}`
+                    : "Not yet crawled"}
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex items-center gap-2 pt-0.5">
                   <Button
                     variant="outline"
                     size="sm"
+                    className="flex-1 sm:flex-none"
                     onClick={() => crawl(topic)}
                     disabled={crawlingId === topic.id}
                   >
-                    <RefreshCw className={cn("w-3 h-3 mr-1", crawlingId === topic.id && "animate-spin")} />
+                    <RefreshCw className={cn("w-3 h-3 mr-1.5", crawlingId === topic.id && "animate-spin")} />
                     {crawlingId === topic.id ? "Crawling…" : "Crawl Now"}
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
+                    className="flex-1 sm:flex-none"
                     onClick={() => toggleExpand(topic.id)}
                   >
                     {isExpanded
-                      ? <><ChevronUp className="w-3 h-3 mr-1" />Hide</>
-                      : <><ChevronDown className="w-3 h-3 mr-1" />Content</>
+                      ? <><ChevronUp className="w-3 h-3 mr-1.5" />Hide</>
+                      : <><ChevronDown className="w-3 h-3 mr-1.5" />Content</>
                     }
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => remove(topic.id)}>
-                    <Trash2 className="w-4 h-4 text-destructive" />
                   </Button>
                 </div>
               </CardContent>
 
               {/* Generated content panel */}
               {isExpanded && (
-                <div className="border-t bg-slate-50 p-4 space-y-4">
+                <div className="border-t bg-muted/40 p-4 space-y-4">
                   {contentLoading === topic.id ? (
                     <p className="text-sm text-muted-foreground text-center py-4">Loading generated content…</p>
                   ) : content.length === 0 ? (
@@ -241,7 +255,7 @@ export default function CrawlerPage() {
                           className={cn(
                             "px-3 py-1 rounded-full text-xs font-medium border transition-colors",
                             tab === "ideas"
-                              ? "bg-slate-900 text-white border-slate-900"
+                              ? "bg-foreground text-background border-foreground"
                               : "border-border hover:bg-accent"
                           )}
                         >
@@ -252,7 +266,7 @@ export default function CrawlerPage() {
                           className={cn(
                             "px-3 py-1 rounded-full text-xs font-medium border transition-colors",
                             tab === "long_form"
-                              ? "bg-slate-900 text-white border-slate-900"
+                              ? "bg-foreground text-background border-foreground"
                               : "border-border hover:bg-accent"
                           )}
                         >
@@ -283,7 +297,7 @@ export default function CrawlerPage() {
       {/* Adapt result modal */}
       {adapted && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+          <div className="bg-card rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b">
               <div className="flex items-center gap-2">
                 <span className="font-semibold">Adapted for</span>
@@ -347,7 +361,7 @@ function ContentCard({
   const isLong = item.content.length > 200;
 
   return (
-    <div className="bg-white rounded-lg border p-4 space-y-3">
+    <div className="bg-card rounded-lg border p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           {item.title && <p className="font-medium text-sm">{item.title}</p>}
@@ -367,7 +381,7 @@ function ContentCard({
         )}
       </div>
 
-      <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed text-slate-700">
+      <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed text-foreground">
         {expanded ? item.content : preview}
         {!expanded && isLong && "…"}
       </pre>

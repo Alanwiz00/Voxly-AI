@@ -80,19 +80,19 @@ export default function GeneratePage() {
       : file !== null;
 
   return (
-    <div className="p-8 space-y-6 max-w-5xl">
+    <div className="p-4 md:p-8 space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-3xl font-bold text-slate-900">Generate Content</h1>
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-900">Generate Content</h1>
         <p className="text-slate-500 mt-1">Create platform-ready content from topics or your own source</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Config panel */}
-        <div className="col-span-1 space-y-4">
+        <div className="md:col-span-1 space-y-4">
           {/* Platform */}
           <Card>
             <CardHeader className="pb-3"><CardTitle className="text-sm">Platform</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-2 gap-2">
+            <CardContent className="grid grid-cols-2 gap-2 sm:grid-cols-2">
               {PLATFORMS.map((p) => (
                 <button
                   key={p}
@@ -142,11 +142,11 @@ export default function GeneratePage() {
         </div>
 
         {/* Source panel */}
-        <div className="col-span-2 space-y-4">
+        <div className="md:col-span-2 space-y-4">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm">Source</CardTitle>
-              <div className="flex gap-2 mt-2">
+              <div className="flex gap-2 mt-2 overflow-x-auto pb-1 scrollbar-none">
                 {(["topic", "text", "url", "file"] as SourceMode[]).map((m) => (
                   <button
                     key={m}

@@ -56,14 +56,14 @@ export default function HistoryPage() {
   };
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-4 md:p-8 space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-slate-900">Content History</h1>
-        <p className="text-slate-500 mt-1">All generated content — re-edit any piece with instructions</p>
+        <h1 className="text-2xl md:text-3xl font-bold text-foreground">Content History</h1>
+        <p className="text-muted-foreground mt-1">All generated content — re-edit any piece with instructions</p>
       </div>
 
       {/* Filters */}
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <select
           value={platformFilter}
           onChange={(e) => setPlatformFilter(e.target.value as Platform | "")}
@@ -106,7 +106,7 @@ export default function HistoryPage() {
                     {item.version > 1 && <Badge variant="secondary">v{item.version}</Badge>}
                     {item.parent_id && <Badge variant="outline" className="text-indigo-600">Re-edit</Badge>}
                   </div>
-                  {item.title && <p className="font-medium mt-1 truncate">{item.title}</p>}
+                  {item.title && <p className="font-medium mt-1 truncate text-foreground">{item.title}</p>}
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {new Date(item.created_at).toLocaleString()}
                   </p>
@@ -134,7 +134,7 @@ export default function HistoryPage() {
 
             {expandedId === item.id && (
               <CardContent className="pt-0">
-                <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed bg-slate-50 rounded-md p-4">
+                <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed text-foreground bg-muted/50 rounded-md p-4">
                   {item.content}
                 </pre>
               </CardContent>
