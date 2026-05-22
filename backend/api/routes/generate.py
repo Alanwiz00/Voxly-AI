@@ -8,7 +8,7 @@ from db.models.persona import PersonaProfile
 from db.models.content import GeneratedContent
 from db.qdrant import search_points
 from services.sentiment import get_embeddings
-from services.persona import get_best_persona_context
+from services.persona import get_best_persona_context, get_persona_context_by_id
 from services.generator import generate_post_ideas, generate_long_form, generate_for_all_platforms
 from services.ingest import ingest, IMAGE_EXTENSIONS, IMAGE_MIME_TYPES
 from core.config import settings
@@ -25,6 +25,7 @@ class GenerateRequest(BaseModel):
     platform: str
     content_type: str  # idea | long_form | thread | article
     idea_count: int = 4  # only for content_type=idea
+    persona_id: int | None = None  # explicit override; None = auto-select via Qdrant
 
 
 async def _get_sentiment_context(topic_id: int | None, topic_name: str, user_id: int) -> str:
@@ -63,7 +64,10 @@ async def generate(body: GenerateRequest, current_user: CurrentUser, db: DB):
             raise HTTPException(status_code=404, detail="Topic not found")
         topic_name = topic.name
 
-    persona_context = await get_best_persona_context(current_user.id, topic_name)
+    if body.persona_id:
+        persona_context = await get_persona_context_by_id(body.persona_id, topic_name)
+    else:
+        persona_context = await get_best_persona_context(current_user.id, topic_name)
     sentiment_context = await _get_sentiment_context(topic_id, topic_name, current_user.id)
 
     if body.content_type == "idea":

@@ -88,6 +88,7 @@ export const generateApi = {
     platform: Platform;
     content_type: ContentType;
     idea_count?: number;
+    persona_id?: number;
   }) => api.post<{ content_type: ContentType; results: GeneratedContent[] }>("/generate/", data),
   fromSource: (form: FormData) =>
     api.post<{ content_type: ContentType; results: GeneratedContent[] }>("/generate/from-source", form, {

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { topicsApi, generateApi, type Topic, type GeneratedContent, type Platform, type ContentType } from "@/lib/api";
+import { topicsApi, generateApi, personaApi, type Topic, type GeneratedContent, type Platform, type ContentType, type Persona } from "@/lib/api";
 import { PLATFORM_LABELS, PLATFORM_COLORS, CONTENT_TYPE_LABELS, cn } from "@/lib/utils";
 
 const PLATFORMS: Platform[] = ["twitter", "instagram", "facebook", "telegram"];
@@ -16,6 +16,8 @@ type SourceMode = "topic" | "text" | "url" | "file";
 
 export default function GeneratePage() {
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<number | null>(null);
   const [platform, setPlatform] = useState<Platform>("twitter");
   const [contentType, setContentType] = useState<ContentType>("idea");
   const [sourceMode, setSourceMode] = useState<SourceMode>("topic");
@@ -30,7 +32,14 @@ export default function GeneratePage() {
   const [copied, setCopied] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { topicsApi.list().then((r) => setTopics(r.data)); }, []);
+  useEffect(() => {
+    topicsApi.list().then((r) => setTopics(r.data));
+    personaApi.list().then((r) => {
+      setPersonas(r.data);
+      const def = r.data.find((p) => p.is_default);
+      setSelectedPersonaId(def?.id ?? r.data[0]?.id ?? null);
+    });
+  }, []);
 
   const copy = async (id: number, text: string) => {
     await navigator.clipboard.writeText(text);
@@ -49,6 +58,7 @@ export default function GeneratePage() {
           platform,
           content_type: contentType,
           idea_count: ideaCount,
+          persona_id: selectedPersonaId || undefined,
         });
         setResults(res.data.results);
       } else {
@@ -99,7 +109,7 @@ export default function GeneratePage() {
                   onClick={() => setPlatform(p)}
                   className={cn(
                     "px-3 py-2 rounded-md text-xs font-medium border transition-colors",
-                    platform === p ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-border hover:bg-accent"
+                    platform === p ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300" : "border-border hover:bg-accent"
                   )}
                 >
                   {PLATFORM_LABELS[p]}
@@ -118,7 +128,7 @@ export default function GeneratePage() {
                   onClick={() => setContentType(ct)}
                   className={cn(
                     "w-full text-left px-3 py-2 rounded-md text-sm border transition-colors",
-                    contentType === ct ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-border hover:bg-accent"
+                    contentType === ct ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border-indigo-500" : "border-border hover:bg-accent"
                   )}
                 >
                   {CONTENT_TYPE_LABELS[ct]}
@@ -139,6 +149,34 @@ export default function GeneratePage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Persona selector — only shown when user has multiple personas */}
+          {personas.length > 1 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Persona</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {personas.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedPersonaId(p.id)}
+                    className={cn(
+                      "w-full text-left px-3 py-2 rounded-md text-sm border transition-colors",
+                      selectedPersonaId === p.id
+                        ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300"
+                        : "border-border hover:bg-accent"
+                    )}
+                  >
+                    <span>{p.name}</span>
+                    {p.is_default && (
+                      <span className="text-xs ml-1.5 text-muted-foreground">(default)</span>
+                    )}
+                  </button>
+                ))}
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Source panel */}

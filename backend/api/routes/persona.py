@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, func
 from api.deps import CurrentUser, DB
 from db.models.persona import PersonaProfile
 from services.persona import PersonaData, embed_persona
@@ -62,8 +62,10 @@ async def list_personas(current_user: CurrentUser, db: DB):
 @router.post("/", response_model=PersonaResponse, status_code=201)
 async def create_persona(body: PersonaCreate, current_user: CurrentUser, db: DB):
     # If this is the user's first persona, make it default automatically
-    existing = await db.execute(select(PersonaProfile).where(PersonaProfile.user_id == current_user.id))
-    is_first = existing.scalar_one_or_none() is None
+    count = await db.scalar(
+        select(func.count()).select_from(PersonaProfile).where(PersonaProfile.user_id == current_user.id)
+    )
+    is_first = count == 0
 
     persona = PersonaProfile(
         user_id=current_user.id,
@@ -121,23 +123,21 @@ async def delete_persona(persona_id: int, current_user: CurrentUser, db: DB):
 
 @router.post("/{persona_id}/set-default", response_model=PersonaResponse)
 async def set_default_persona(persona_id: int, current_user: CurrentUser, db: DB):
-    # Unset all defaults for this user
-    all_personas = await db.execute(
+    result = await db.execute(
         select(PersonaProfile).where(PersonaProfile.user_id == current_user.id)
     )
-    for p in all_personas.scalars().all():
-        p.is_default = p.id == persona_id
+    personas = result.scalars().all()
 
-    result = await db.execute(
-        select(PersonaProfile).where(PersonaProfile.id == persona_id, PersonaProfile.user_id == current_user.id)
-    )
-    persona = result.scalar_one_or_none()
-    if not persona:
+    target = next((p for p in personas if p.id == persona_id), None)
+    if not target:
         raise HTTPException(status_code=404, detail="Persona not found")
 
+    for p in personas:
+        p.is_default = (p.id == persona_id)
+
     await db.commit()
-    await db.refresh(persona)
-    return PersonaResponse.from_orm_ext(persona)
+    await db.refresh(target)
+    return PersonaResponse.from_orm_ext(target)
 
 
 @router.post("/{persona_id}/synthesize-style", response_model=PersonaResponse)
