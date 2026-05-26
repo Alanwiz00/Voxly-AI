@@ -27,5 +27,6 @@ class User(Base):
     personas: Mapped[list["PersonaProfile"]] = relationship(back_populates="user")
     topics: Mapped[list["Topic"]] = relationship(back_populates="user")
     contents: Mapped[list["GeneratedContent"]] = relationship(back_populates="user")
+    api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user")
 
 

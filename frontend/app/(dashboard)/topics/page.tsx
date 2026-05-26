@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { topicsApi, contentApi, type Topic, type GeneratedContent, type Platform } from "@/lib/api";
 import { PLATFORM_LABELS, PLATFORM_COLORS, cn } from "@/lib/utils";
+import RatingButtons from "@/components/rating-buttons";
 
 const PLATFORMS: Platform[] = ["twitter", "instagram", "facebook", "telegram"];
 
@@ -114,6 +115,17 @@ export default function CrawlerPage() {
   const getTab = (topicId: number): TabKey => activeTab[topicId] ?? "ideas";
   const setTab = (topicId: number, tab: TabKey) =>
     setActiveTab((prev) => ({ ...prev, [topicId]: tab }));
+
+  const [ratings, setRatings] = useState<Record<number, number | null>>({});
+
+  const handleRate = async (id: number, rating: number) => {
+    setRatings((prev) => ({ ...prev, [id]: rating === 0 ? null : rating }));
+    try {
+      await contentApi.rate(id, rating);
+    } catch {
+      setRatings((prev) => ({ ...prev, [id]: undefined as unknown as null }));
+    }
+  };
 
   return (
     <div className="p-4 md:p-8 space-y-6 max-w-4xl">
@@ -282,6 +294,8 @@ export default function CrawlerPage() {
                             item={item}
                             adaptingId={adaptingId}
                             onAdapt={adaptContent}
+                            rating={ratings[item.id] ?? item.rating}
+                            onRate={handleRate}
                           />
                         ))}
                       </div>
@@ -347,10 +361,14 @@ function ContentCard({
   item,
   adaptingId,
   onAdapt,
+  rating,
+  onRate,
 }: {
   item: GeneratedContent;
   adaptingId: number | null;
   onAdapt: (id: number, platform: Platform) => void;
+  rating?: number | null;
+  onRate: (id: number, rating: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const meta = item.meta as Record<string, unknown>;
@@ -367,18 +385,21 @@ function ContentCard({
           {item.title && <p className="font-medium text-sm">{item.title}</p>}
           {hook && <p className="text-xs text-muted-foreground italic mt-0.5">Hook: {hook}</p>}
         </div>
-        {score !== undefined && (
-          <span
-            className={cn(
-              "text-xs font-semibold px-2 py-0.5 rounded-full shrink-0",
-              score >= 8 ? "bg-green-100 text-green-700" :
-              score >= 6 ? "bg-yellow-100 text-yellow-700" :
-              "bg-red-100 text-red-700"
-            )}
-          >
-            {score}/10
-          </span>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <RatingButtons contentId={item.id} rating={rating} onRate={onRate} />
+          {score !== undefined && (
+            <span
+              className={cn(
+                "text-xs font-semibold px-2 py-0.5 rounded-full",
+                score >= 8 ? "bg-green-100 text-green-700" :
+                score >= 6 ? "bg-yellow-100 text-yellow-700" :
+                "bg-red-100 text-red-700"
+              )}
+            >
+              {score}/10
+            </span>
+          )}
+        </div>
       </div>
 
       <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed text-foreground">

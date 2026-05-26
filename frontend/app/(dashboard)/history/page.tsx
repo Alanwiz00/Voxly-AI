@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Copy, Check, Pencil, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import RatingButtons from "@/components/rating-buttons";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ export default function HistoryPage() {
   const [platformFilter, setPlatformFilter] = useState<Platform | "">("");
   const [typeFilter, setTypeFilter] = useState<ContentType | "">("");
   const [copied, setCopied] = useState<number | null>(null);
+  const [ratings, setRatings] = useState<Record<number, number | null>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editInstruction, setEditInstruction] = useState("");
   const [editLoading, setEditLoading] = useState(false);
@@ -31,6 +33,15 @@ export default function HistoryPage() {
     await navigator.clipboard.writeText(text);
     setCopied(id);
     setTimeout(() => setCopied(null), 2000);
+  };
+
+  const handleRate = async (id: number, rating: number) => {
+    setRatings((prev) => ({ ...prev, [id]: rating === 0 ? null : rating }));
+    try {
+      await contentApi.rate(id, rating);
+    } catch {
+      setRatings((prev) => ({ ...prev, [id]: undefined as unknown as null }));
+    }
   };
 
   const reEdit = async (item: GeneratedContent) => {
@@ -111,7 +122,12 @@ export default function HistoryPage() {
                     {new Date(item.created_at).toLocaleString()}
                   </p>
                 </div>
-                <div className="flex gap-1 shrink-0">
+                <div className="flex gap-1 shrink-0 items-center">
+                  <RatingButtons
+                    contentId={item.id}
+                    rating={ratings[item.id] ?? item.rating}
+                    onRate={handleRate}
+                  />
                   <Button variant="ghost" size="icon" onClick={() => copy(item.id, item.content)}>
                     {copied === item.id ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
                   </Button>

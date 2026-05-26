@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, SmallInteger, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db.postgres import Base
 
@@ -18,6 +18,7 @@ class GeneratedContent(Base):
     meta: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # hashtags, thread_count, etc.
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("generated_content.id", ondelete="SET NULL"))
     version: Mapped[int] = mapped_column(Integer, default=1)
+    rating: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="contents")

@@ -111,6 +111,53 @@ async def re_edit(content_id: int, body: ReEditRequest, background_tasks: Backgr
     return _serialize(new_record)
 
 
+class RateRequest(BaseModel):
+    rating: int  # 1 = thumbs up, -1 = thumbs down, 0 = remove rating
+
+
+@router.post("/{content_id}/rate")
+async def rate_content(
+    content_id: int,
+    body: RateRequest,
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser,
+    db: DB,
+):
+    if body.rating not in {-1, 0, 1}:
+        raise HTTPException(status_code=400, detail="Rating must be -1, 0, or 1")
+
+    result = await db.execute(
+        select(GeneratedContent).where(
+            GeneratedContent.id == content_id,
+            GeneratedContent.user_id == current_user.id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="Content not found")
+
+    record.rating = None if body.rating == 0 else body.rating
+    await db.commit()
+    await db.refresh(record)
+
+    # Auto-synthesize style when enough thumbs-up ratings accumulate
+    from sqlalchemy import and_
+    rated_count_result = await db.execute(
+        select(func.count()).select_from(GeneratedContent).where(
+            and_(
+                GeneratedContent.user_id == current_user.id,
+                GeneratedContent.rating.isnot(None),
+            )
+        )
+    )
+    rated_count = rated_count_result.scalar() or 0
+    if rated_count >= 3 and rated_count % 3 == 0:
+        from services.style_synthesis import run_synthesis_and_save
+        background_tasks.add_task(run_synthesis_and_save, current_user.id)
+
+    return _serialize(record)
+
+
 class AdaptRequest(BaseModel):
     platform: str
 
@@ -184,6 +231,7 @@ def _serialize(r: GeneratedContent) -> dict:
         "meta": r.meta,
         "version": r.version,
         "parent_id": r.parent_id,
+        "rating": r.rating,
         "created_at": r.created_at.isoformat(),
     }
 

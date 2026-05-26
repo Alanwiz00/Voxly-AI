@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from db.postgres import init_db
 from db.qdrant import ensure_collections
-from api.routes import auth, users, topics, generate, content, persona
+from api.routes import auth, users, topics, generate, content, persona, api_keys
 
 
 @asynccontextmanager
@@ -39,8 +39,30 @@ async def _migrate_db() -> None:
             "ALTER TABLE persona_profiles ADD COLUMN IF NOT EXISTS name VARCHAR(255) DEFAULT 'Default'",
             "ALTER TABLE persona_profiles ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE",
             "ALTER TABLE persona_profiles DROP CONSTRAINT IF EXISTS persona_profiles_user_id_key",
-            # Mark existing single personas as default
+            # Mark existing single personas as default (initial migration)
             "UPDATE persona_profiles SET is_default = TRUE WHERE is_default = FALSE",
+            # Fix: if multiple personas per user are all marked default, keep only the oldest one
+            """
+            UPDATE persona_profiles
+            SET is_default = FALSE
+            WHERE is_default = TRUE
+              AND id NOT IN (
+                SELECT MIN(id) FROM persona_profiles GROUP BY user_id
+              )
+            """,
+            "ALTER TABLE generated_content ADD COLUMN IF NOT EXISTS rating SMALLINT",
+            """
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id SERIAL PRIMARY KEY,
+                user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name VARCHAR(255) NOT NULL,
+                key_hash VARCHAR(64) NOT NULL UNIQUE,
+                key_prefix VARCHAR(16) NOT NULL,
+                is_active BOOLEAN DEFAULT TRUE,
+                last_used_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
         ]:
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
@@ -80,6 +102,7 @@ app.include_router(topics.router)
 app.include_router(generate.router)
 app.include_router(content.router)
 app.include_router(persona.router)
+app.include_router(api_keys.router)
 
 
 @app.get("/health")

@@ -4,47 +4,52 @@ from openai import AsyncOpenAI
 from core.config import settings
 from services.sentiment import get_openai
 
-MIN_EDITS_REQUIRED = 3
-MAX_EDITS_SAMPLED = 30
+MIN_RATINGS_REQUIRED = 3
+MAX_LIKED_SAMPLED = 20
+MAX_DISLIKED_SAMPLED = 10
 
 
 async def synthesize_user_style(user_id: int) -> str | None:
     """
-    Reads the user's re-edit history, runs an LLM pass to distill consistent
+    Reads the user's thumbs-up/down ratings, runs an LLM pass to distill
     style preferences, and returns a bullet-point style profile string.
-    Returns None if there is not enough edit history yet.
+    Returns None if there are not enough ratings yet.
     """
     from sqlalchemy import select
     from db.postgres import AsyncSessionLocal
-    from db.models.content import ContentVersion, GeneratedContent
+    from db.models.content import GeneratedContent
 
     async with AsyncSessionLocal() as db:
-        rows = await db.execute(
-            select(ContentVersion, GeneratedContent)
-            .join(GeneratedContent, ContentVersion.content_id == GeneratedContent.id)
-            .where(GeneratedContent.user_id == user_id)
-            .order_by(ContentVersion.created_at.desc())
-            .limit(MAX_EDITS_SAMPLED)
+        liked_rows = await db.execute(
+            select(GeneratedContent)
+            .where(GeneratedContent.user_id == user_id, GeneratedContent.rating == 1)
+            .order_by(GeneratedContent.created_at.desc())
+            .limit(MAX_LIKED_SAMPLED)
         )
-        pairs = rows.all()
+        liked = liked_rows.scalars().all()
 
-    if len(pairs) < MIN_EDITS_REQUIRED:
+        disliked_rows = await db.execute(
+            select(GeneratedContent)
+            .where(GeneratedContent.user_id == user_id, GeneratedContent.rating == -1)
+            .order_by(GeneratedContent.created_at.desc())
+            .limit(MAX_DISLIKED_SAMPLED)
+        )
+        disliked = disliked_rows.scalars().all()
+
+    if len(liked) < MIN_RATINGS_REQUIRED:
         return None
 
-    # Build edit history text — only pairs that have an instruction
-    history_items = [
-        (version, original)
-        for version, original in pairs
-        if version.edit_instruction and version.edit_instruction.strip()
-    ]
-    if len(history_items) < MIN_EDITS_REQUIRED:
-        return None
-
-    history_text = "\n\n".join(
-        f"{i + 1}. Instruction: \"{h.edit_instruction}\"\n"
-        f"   Before: {orig.content[:300]}{'...' if len(orig.content) > 300 else ''}\n"
-        f"   After: {h.content[:300]}{'...' if len(h.content) > 300 else ''}"
-        for i, (h, orig) in enumerate(history_items)
+    liked_text = "\n\n".join(
+        f"{i + 1}. [{c.content_type} / {c.platform}]\n{c.content[:400]}{'...' if len(c.content) > 400 else ''}"
+        for i, c in enumerate(liked)
+    )
+    disliked_text = (
+        "\n\n".join(
+            f"{i + 1}. [{c.content_type} / {c.platform}]\n{c.content[:300]}{'...' if len(c.content) > 300 else ''}"
+            for i, c in enumerate(disliked)
+        )
+        if disliked
+        else "None provided yet."
     )
 
     response = await get_openai().chat.completions.create(
@@ -53,21 +58,21 @@ async def synthesize_user_style(user_id: int) -> str | None:
             {
                 "role": "system",
                 "content": (
-                    "You are a writing style analyst. Analyze editing patterns and distill them into a "
-                    "concise, actionable style guide another writer can follow precisely."
+                    "You are a writing style analyst. Given content a user approved and rejected, "
+                    "extract their precise style preferences as a concise, actionable guide."
                 ),
             },
             {
                 "role": "user",
                 "content": (
-                    f"Here are {len(history_items)} editing patterns from a content creator:\n\n"
-                    f"{history_text}\n\n"
+                    f"CONTENT THE USER LIKED ({len(liked)} items):\n{liked_text}\n\n"
+                    f"CONTENT THE USER DISLIKED ({len(disliked)} items):\n{disliked_text}\n\n"
                     "Extract 5-8 specific, actionable style preferences. Focus on:\n"
                     "- Sentence length and rhythm\n"
                     "- Tone (formal vs casual, direct vs narrative, personal vs authoritative)\n"
-                    "- What they consistently add (humor, data, questions, analogies, stories)\n"
-                    "- What they consistently remove or avoid (jargon, passive voice, hedging, filler)\n"
-                    "- Structural patterns (how they open, close, use lists)\n\n"
+                    "- What they consistently prefer (humor, data, questions, analogies, stories)\n"
+                    "- What they consistently dislike or want avoided\n"
+                    "- Structural patterns (hooks, closings, lists vs paragraphs)\n\n"
                     "Be specific — not 'uses casual tone' but 'uses contractions and first-person anecdotes'.\n\n"
                     'Return JSON: {"style_summary": "• preference 1\\n• preference 2\\n..."}'
                 ),

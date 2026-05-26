@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Save, Plus, X, BrainCircuit, RefreshCw, Star, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { Save, Plus, X, BrainCircuit, RefreshCw, Star, Trash2, ChevronDown, ChevronUp, KeyRound, Copy, Check, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { personaApi, usersApi, type Persona } from "@/lib/api";
+import { personaApi, usersApi, apiKeysApi, type Persona, type ApiKeyRecord } from "@/lib/api";
 
 const EMPTY_PERSONA: Partial<Persona> = {
   name: "", niche: "", tone: "", target_audience: "",
@@ -108,10 +108,10 @@ function PersonaCard({ persona, onUpdated, onDeleted, onSetDefault }: {
     try {
       const res = await personaApi.synthesizeStyle(persona.id);
       onUpdated(res.data);
-      toast.success("Style profile updated from your edit history");
+      toast.success("Style profile updated from your ratings");
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      toast.error(msg || "Not enough edit history yet");
+      toast.error(msg || "Rate at least 3 posts first to build a style profile");
     } finally { setSynthesizing(false); }
   };
 
@@ -160,7 +160,7 @@ function PersonaCard({ persona, onUpdated, onDeleted, onSetDefault }: {
             {persona.learned_style ? (
               <div className="space-y-1">
                 <div className="flex justify-between items-center">
-                  <p className="text-xs text-muted-foreground">Learned from edit history</p>
+                  <p className="text-xs text-muted-foreground">Learned from your ratings</p>
                   {persona.style_synthesized_at && (
                     <span className="text-xs text-muted-foreground">
                       Updated {new Date(persona.style_synthesized_at).toLocaleDateString()}
@@ -173,7 +173,7 @@ function PersonaCard({ persona, onUpdated, onDeleted, onSetDefault }: {
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
-                No learned style yet. Make at least 3 re-edits and the AI will build a style profile automatically.
+                No learned style yet. 👍 Rate at least 3 generated posts and VoxlyAI will automatically build a style profile that improves every future generation.
               </p>
             )}
             <Button variant="outline" size="sm" onClick={synthesize} disabled={synthesizing}>
@@ -187,6 +187,20 @@ function PersonaCard({ persona, onUpdated, onDeleted, onSetDefault }: {
   );
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={copy}>
+      {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+    </Button>
+  );
+}
+
 export default function SettingsPage() {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [showNewForm, setShowNewForm] = useState(false);
@@ -195,12 +209,20 @@ export default function SettingsPage() {
   const [allowedEmails, setAllowedEmails] = useState<{ id: number; email: string }[]>([]);
   const [newEmail, setNewEmail] = useState("");
 
+  // API Keys state
+  const [apiKeys, setApiKeys] = useState<ApiKeyRecord[]>([]);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [creatingKey, setCreatingKey] = useState(false);
+  const [revealedKey, setRevealedKey] = useState<{ id: number; key: string } | null>(null);
+  const [showKeyValue, setShowKeyValue] = useState(false);
+
   useEffect(() => {
     personaApi.list().then((r) => setPersonas(r.data));
     usersApi.me().then((r) => {
       if (r.data.is_admin) {
         setIsAdmin(true);
         usersApi.listAllowedEmails().then((res) => setAllowedEmails(res.data));
+        apiKeysApi.list().then((res) => setApiKeys(res.data));
       }
     });
   }, []);
@@ -214,6 +236,33 @@ export default function SettingsPage() {
       toast.success("Persona created");
     } catch { toast.error("Failed to create persona"); }
     finally { setCreatingNew(false); }
+  };
+
+  const createKey = async () => {
+    if (!newKeyName.trim()) return;
+    setCreatingKey(true);
+    try {
+      const res = await apiKeysApi.create(newKeyName.trim());
+      const record = res.data;
+      setApiKeys((prev) => [record, ...prev]);
+      setNewKeyName("");
+      if (record.key) {
+        setRevealedKey({ id: record.id, key: record.key });
+        setShowKeyValue(false);
+      }
+      toast.success("API key created — copy it now, it won't be shown again");
+    } catch { toast.error("Failed to create API key"); }
+    finally { setCreatingKey(false); }
+  };
+
+  const revokeKey = async (id: number, name: string) => {
+    if (!confirm(`Revoke "${name}"? Any agent using this key will lose access immediately.`)) return;
+    try {
+      await apiKeysApi.revoke(id);
+      setApiKeys((prev) => prev.filter((k) => k.id !== id));
+      if (revealedKey?.id === id) setRevealedKey(null);
+      toast.success("API key revoked");
+    } catch { toast.error("Failed to revoke API key"); }
   };
 
   const addEmail = async () => {
@@ -236,16 +285,16 @@ export default function SettingsPage() {
   return (
     <div className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-3xl">
       <div>
-        <h1 className="text-2xl md:text-3xl font-bold text-slate-900">Settings</h1>
-        <p className="text-slate-500 mt-1">Manage your personas and access control</p>
+        <h1 className="text-2xl md:text-3xl font-bold text-foreground">Settings</h1>
+        <p className="text-muted-foreground mt-1">Manage your personas and access control</p>
       </div>
 
       {/* Personas */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-semibold text-slate-800">Personas</h2>
-            <p className="text-sm text-slate-500 mt-0.5">
+            <h2 className="text-xl font-semibold text-foreground">Personas</h2>
+            <p className="text-sm text-muted-foreground mt-0.5">
               The AI auto-selects the best persona for every topic and context. The default is used as fallback.
             </p>
           </div>
@@ -297,6 +346,88 @@ export default function SettingsPage() {
           />
         ))}
       </div>
+
+      {/* API Keys — admin only */}
+      {isAdmin && <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <KeyRound className="w-5 h-5 text-indigo-500" />
+            <div>
+              <CardTitle>API Keys</CardTitle>
+              <CardDescription className="mt-0.5">
+                Use API keys to let AI agents and external tools generate content on your behalf.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Create new key */}
+          <div className="flex gap-2">
+            <Input
+              placeholder='Key name, e.g. "MCP Server" or "Fetch Agent"'
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && createKey()}
+            />
+            <Button onClick={createKey} disabled={creatingKey || !newKeyName.trim()}>
+              <Plus className="w-4 h-4 mr-2" />
+              {creatingKey ? "Creating…" : "Create"}
+            </Button>
+          </div>
+
+          {/* Newly created key reveal */}
+          {revealedKey && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 p-3 space-y-2">
+              <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                Copy your key now — it will never be shown again.
+              </p>
+              <div className="flex items-center gap-2 bg-white dark:bg-slate-900 rounded-md border px-3 py-2">
+                <code className="flex-1 text-xs font-mono text-slate-800 dark:text-slate-200 break-all select-all">
+                  {showKeyValue ? revealedKey.key : revealedKey.key.slice(0, 13) + "•".repeat(20)}
+                </code>
+                <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setShowKeyValue((v) => !v)}>
+                  {showKeyValue ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </Button>
+                <CopyButton text={revealedKey.key} />
+              </div>
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-6" onClick={() => setRevealedKey(null)}>
+                Done, I've saved it
+              </Button>
+            </div>
+          )}
+
+          {/* Keys list */}
+          {apiKeys.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No API keys yet. Create one above.</p>
+          ) : (
+            <div className="space-y-2">
+              {apiKeys.map((k) => (
+                <div key={k.id} className="flex items-center justify-between px-3 py-2.5 bg-muted/40 rounded-md gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{k.name}</p>
+                    <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                      {k.key_prefix}••••••••••••
+                      <span className="font-sans ml-3">
+                        {k.last_used_at
+                          ? `Last used ${new Date(k.last_used_at).toLocaleDateString()}`
+                          : `Created ${new Date(k.created_at).toLocaleDateString()}`}
+                      </span>
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0"
+                    onClick={() => revokeKey(k.id, k.name)}
+                  >
+                    <Trash2 className="w-4 h-4 text-red-400" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>}
 
       {/* Access control — admin only */}
       {isAdmin && (

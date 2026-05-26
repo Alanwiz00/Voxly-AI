@@ -52,6 +52,7 @@ export interface GeneratedContent {
   meta: Record<string, unknown>;
   version: number;
   parent_id: number | null;
+  rating?: number | null;
   created_at: string;
 }
 
@@ -106,6 +107,7 @@ export const contentApi = {
   adapt: (id: number, platform: Platform) =>
     api.post<GeneratedContent>(`/content/${id}/adapt`, { platform }),
   delete: (id: number) => api.delete(`/content/${id}`),
+  rate: (id: number, rating: number) => api.post<GeneratedContent>(`/content/${id}/rate`, { rating }),
 };
 
 // Persona
@@ -131,4 +133,21 @@ export const usersApi = {
   listAllowedEmails: () => api.get("/users/allowed-emails"),
   addAllowedEmail: (email: string) => api.post("/users/allowed-emails", { email }),
   removeAllowedEmail: (email: string) => api.delete(`/users/allowed-emails/${email}`),
+};
+
+// API Keys
+export interface ApiKeyRecord {
+  id: number;
+  name: string;
+  key_prefix: string;
+  is_active: boolean;
+  last_used_at: string | null;
+  created_at: string;
+  key?: string | null;
+}
+
+export const apiKeysApi = {
+  list: () => api.get<ApiKeyRecord[]>("/api-keys/"),
+  create: (name: string) => api.post<ApiKeyRecord>("/api-keys/", { name }),
+  revoke: (id: number) => api.delete(`/api-keys/${id}`),
 };

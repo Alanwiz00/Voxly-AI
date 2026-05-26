@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { topicsApi, generateApi, personaApi, type Topic, type GeneratedContent, type Platform, type ContentType, type Persona } from "@/lib/api";
+import { topicsApi, generateApi, personaApi, contentApi, type Topic, type GeneratedContent, type Platform, type ContentType, type Persona } from "@/lib/api";
 import { PLATFORM_LABELS, PLATFORM_COLORS, CONTENT_TYPE_LABELS, cn } from "@/lib/utils";
+import RatingButtons from "@/components/rating-buttons";
 
 const PLATFORMS: Platform[] = ["twitter", "instagram", "facebook", "telegram"];
 const CONTENT_TYPES: ContentType[] = ["idea", "long_form", "thread", "article"];
@@ -30,6 +31,7 @@ export default function GeneratePage() {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<GeneratedContent[]>([]);
   const [copied, setCopied] = useState<number | null>(null);
+  const [ratings, setRatings] = useState<Record<number, number | null>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -45,6 +47,16 @@ export default function GeneratePage() {
     await navigator.clipboard.writeText(text);
     setCopied(id);
     setTimeout(() => setCopied(null), 2000);
+  };
+
+  const handleRate = async (id: number, rating: number) => {
+    setRatings((prev) => ({ ...prev, [id]: rating === 0 ? null : rating }));
+    try {
+      await contentApi.rate(id, rating);
+    } catch {
+      // revert on error
+      setRatings((prev) => ({ ...prev, [id]: undefined as unknown as null }));
+    }
   };
 
   const generate = async () => {
@@ -319,7 +331,12 @@ export default function GeneratePage() {
       {/* Results */}
       {results.length > 0 && (
         <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Generated Content</h2>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="text-xl font-semibold">Generated Content</h2>
+            <p className="text-xs text-muted-foreground">
+              👍 Rate content to help VoxlyAI learn your style and generate better posts
+            </p>
+          </div>
           {results.map((item) => {
             const meta = item.meta as Record<string, unknown>;
             const score = meta?.score as number | undefined;
@@ -353,9 +370,16 @@ export default function GeneratePage() {
                       <p className="text-xs text-muted-foreground mt-1 italic">Hook: {hook}</p>
                     )}
                   </div>
-                  <Button variant="ghost" size="icon" onClick={() => copy(item.id, item.content)}>
-                    {copied === item.id ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <RatingButtons
+                      contentId={item.id}
+                      rating={ratings[item.id] ?? item.rating}
+                      onRate={handleRate}
+                    />
+                    <Button variant="ghost" size="icon" onClick={() => copy(item.id, item.content)}>
+                      {copied === item.id ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed text-foreground bg-muted/50 rounded-md p-3">

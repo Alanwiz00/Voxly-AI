@@ -100,6 +100,36 @@ services:
         condition: service_healthy
     command: celery -A workers.crawl_worker.celery_app flower --port=5555
 
+  fetch-agent:
+    build: ./fetch-agent
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    environment:
+      - VOXLY_API_URL=http://backend:8000
+      - VOXLY_API_KEY=${VOXLY_FETCH_API_KEY}
+      - AGENT_SEED=${FETCH_AGENT_SEED}
+      - AGENT_NAME=voxlyai-content-generator
+      - AGENT_PORT=8002
+      - AGENT_INSPECTOR=true
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  mcp-server:
+    build: ./mcp-server
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - VOXLY_API_URL=http://backend:8000
+      - VOXLY_API_KEY=${VOXLY_MCP_API_KEY}
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8001
+    depends_on:
+      backend:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./frontend
@@ -116,6 +146,8 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       - INTERNAL_API_URL=http://backend:8000
+      - NEXT_PUBLIC_TURNSTILE_SITE_KEY=${NEXT_PUBLIC_TURNSTILE_SITE_KEY}
+      - TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY}
     command: npm run dev
     volumes:
       - ./frontend:/app

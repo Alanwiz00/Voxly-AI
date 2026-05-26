@@ -3,9 +3,6 @@ import Google from "next-auth/providers/google";
 import type { Session } from "next-auth";
 import { authConfig } from "./auth.config";
 
-// Server-side calls go via the internal Docker network URL, not localhost
-const INTERNAL_API = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
   providers: [
@@ -16,18 +13,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ],
   callbacks: {
     async signIn({ user }) {
-      const email = user.email;
-      if (!email) return false;
-
-      try {
-        const res = await fetch(
-          `${INTERNAL_API}/auth/check-access?email=${encodeURIComponent(email)}`,
-          { headers: { "X-Internal-Secret": process.env.NEXTAUTH_SECRET! } }
-        );
-        return res.ok;
-      } catch {
-        return false;
-      }
+      // Open registration — any verified Google account is allowed
+      return !!user.email;
     },
 
     async jwt({ token, account, profile }) {
