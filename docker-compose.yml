@@ -112,6 +112,8 @@ services:
       - AGENT_NAME=voxlyai-content-generator
       - AGENT_PORT=8002
       - AGENT_INSPECTOR=true
+      - AGENT_ENDPOINT=${FETCH_AGENT_ENDPOINT:-}
+      - AGENTVERSE_KEY=${AGENTVERSE_KEY:-}
     depends_on:
       backend:
         condition: service_healthy

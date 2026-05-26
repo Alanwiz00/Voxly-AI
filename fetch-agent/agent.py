@@ -1,4 +1,4 @@
-"""VoxlyAI Fetch.ai uAgent — receives content generation requests via Agentverse mailbox."""
+"""VoxlyAI Fetch.ai uAgent — receives content generation requests via Agentverse."""
 import os
 import httpx
 from uagents import Agent, Context, Model, Protocol
@@ -12,17 +12,44 @@ AGENT_SEED = os.environ["AGENT_SEED"]
 AGENT_NAME = os.environ.get("AGENT_NAME", "voxlyai-content-generator")
 AGENT_PORT = int(os.environ.get("AGENT_PORT", "8002"))
 AGENT_INSPECTOR = os.environ.get("AGENT_INSPECTOR", "true").lower() == "true"
+# Public HTTPS URL Agentverse uses to deliver messages, e.g. https://agent.yourdomain.com/submit
+AGENT_ENDPOINT = os.environ.get("AGENT_ENDPOINT", "")
 
 agent = Agent(
     name=AGENT_NAME,
     seed=AGENT_SEED,
     port=AGENT_PORT,
-    mailbox=True,
+    endpoint=AGENT_ENDPOINT if AGENT_ENDPOINT else None,
+    mailbox=not bool(AGENT_ENDPOINT),
     enable_agent_inspector=AGENT_INSPECTOR,
+    # Description is read by DeltaV to match user queries — write it as user intent
     description=(
-        "AI-powered social media content generator. "
-        "Generates posts, threads, and articles for Twitter, Instagram, Facebook, and Telegram."
+        "Generate social media content, posts, tweets, threads, and articles using AI. "
+        "Create engaging content for Twitter, Instagram, Facebook, and Telegram. "
+        "Supports multiple content formats: ideas, long-form posts, tweet threads, and articles. "
+        "Uses your brand voice and writing style to produce on-brand content at scale. "
+        "Ideal for content creators, marketers, and brands who need AI-powered copywriting."
     ),
+    metadata={
+        "tags": [
+            "content-generation",
+            "social-media",
+            "copywriting",
+            "twitter",
+            "instagram",
+            "facebook",
+            "telegram",
+            "ai-writing",
+            "marketing",
+            "content-creation",
+            "threads",
+            "articles",
+            "brand-voice",
+        ],
+        "category": "content-generation",
+        "author": "VoxlyAI",
+        "version": "1.0.0",
+    },
 )
 
 # ---------------------------------------------------------------------------
@@ -48,10 +75,16 @@ def _client() -> httpx.AsyncClient:
 # ---------------------------------------------------------------------------
 
 class GenerateRequest(Model):
-    """Request content generation from VoxlyAI.
+    """Generate AI-powered social media content for a given topic and platform.
 
+    Send this to request content creation. VoxlyAI will use the configured
+    brand voice and writing style to produce on-brand posts, threads, or articles.
+
+    topic:        subject or theme to write about (e.g. "AI in healthcare", "product launch")
     platform:     twitter | instagram | facebook | telegram
     content_type: idea | long_form | thread | article
+    idea_count:   how many content ideas to generate (default 4, applies to content_type=idea)
+    persona_id:   optional — pin to a specific writing persona; omit to auto-select
     """
     topic: str
     platform: str
@@ -61,12 +94,17 @@ class GenerateRequest(Model):
 
 
 class GenerateResponse(Model):
+    """Response containing the generated content pieces, or an error message."""
     results: list[str]
     error: str | None = None
 
 
 class ListTopicsRequest(Model):
-    """Request the list of saved VoxlyAI topics."""
+    """List all saved content topics in VoxlyAI.
+
+    Topics are recurring subjects used for content planning and generation.
+    Returns topic IDs you can reference when calling GenerateRequest.
+    """
     pass
 
 
@@ -76,7 +114,11 @@ class ListTopicsResponse(Model):
 
 
 class ListPersonasRequest(Model):
-    """Request the list of configured VoxlyAI personas."""
+    """List all writing personas configured in VoxlyAI.
+
+    Each persona has a distinct brand voice, tone, niche, and target audience.
+    Returns persona IDs you can pass to GenerateRequest to pin a specific style.
+    """
     pass
 
 
@@ -158,8 +200,29 @@ async def startup(ctx: Context):
     ctx.logger.info("VoxlyAI Fetch.ai agent started")
     ctx.logger.info(f"Agent name:    {AGENT_NAME}")
     ctx.logger.info(f"Agent address: {agent.address}")
-    ctx.logger.info("Share the address above with other agents on Agentverse")
     ctx.logger.info("=" * 60)
+
+    agentverse_key = os.environ.get("AGENTVERSE_KEY", "")
+    if agentverse_key and AGENT_ENDPOINT:
+        try:
+            from uagents_core.utils.registration import (
+                register_chat_agent,
+                RegistrationRequestCredentials,
+            )
+            register_chat_agent(
+                "Voxly AI",
+                AGENT_ENDPOINT,
+                active=True,
+                credentials=RegistrationRequestCredentials(
+                    agentverse_api_key=agentverse_key,
+                    agent_seed_phrase=AGENT_SEED,
+                ),
+            )
+            ctx.logger.info("Registered with Agentverse DeltaV chat")
+        except Exception as e:
+            ctx.logger.error(f"Agentverse registration failed: {e}")
+    else:
+        ctx.logger.warning("AGENTVERSE_KEY or AGENT_ENDPOINT not set — skipping DeltaV registration")
 
 
 @agent.on_interval(period=30.0)

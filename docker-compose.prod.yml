@@ -92,6 +92,9 @@ services:
     restart: always
     networks:
       - internal
+      - dokploy-network
+    expose:
+      - "8002"
     environment:
       - VOXLY_API_URL=http://backend:8000
       - VOXLY_API_KEY=${VOXLY_FETCH_API_KEY}
@@ -99,6 +102,8 @@ services:
       - AGENT_NAME=voxlyai-content-generator
       - AGENT_PORT=8002
       - AGENT_INSPECTOR=false
+      - AGENT_ENDPOINT=${FETCH_AGENT_ENDPOINT}
+      - AGENTVERSE_KEY=${AGENTVERSE_KEY}
     depends_on:
       backend:
         condition: service_healthy
