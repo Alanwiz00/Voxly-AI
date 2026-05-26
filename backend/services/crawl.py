@@ -36,9 +36,13 @@ async def extract_content(url: str) -> str | None:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
-            lambda: get_firecrawl().scrape_url(url, params={"formats": ["markdown"]}),
+            lambda: get_firecrawl().scrape_url(url, formats=["markdown"]),
         )
-        return result.get("markdown", "")[:8000]  # cap at 8k chars per page
+        if isinstance(result, dict):
+            markdown = result.get("markdown", "")
+        else:
+            markdown = getattr(result, "markdown", None) or ""
+        return markdown[:8000]
     except Exception:
         return None
 
