@@ -8,22 +8,24 @@ PLATFORM_INSTRUCTIONS = {
     "twitter": (
         "Twitter/X. Audience scrolls fast — lead with a bold hook. "
         "Use short punchy sentences. Numbers, contrarian takes, and questions perform well. "
-        "For threads: first tweet must standalone as a hook. No corporate speak."
+        "For threads: first tweet must standalone as a hook. No corporate speak. "
+        "No emojis — plain text outperforms emoji-heavy posts on X."
     ),
     "instagram": (
         "Instagram. The first line must stop the scroll before 'more' is tapped. "
-        "Use line breaks for readability. Emojis used sparingly and purposefully. "
+        "Use line breaks for readability. Use emojis very sparingly — 1-2 max, only when they add meaning. "
         "End with a question to drive comments. Suggest 10-15 targeted hashtags."
     ),
     "facebook": (
         "Facebook. Conversational and personal tone. Medium length (100-300 words). "
         "Tell a short story or share an insight. End with a clear call to action or question. "
-        "Avoid overly salesy language."
+        "Avoid overly salesy language. Minimal emojis — use only when natural."
     ),
     "telegram": (
         "Telegram channel. Readers opted in — they want depth and value. "
         "Use markdown (*bold*, _italic_) for structure. Can be longer. "
-        "Be direct, informative, and opinionated. End with a key takeaway."
+        "Be direct, informative, and opinionated. End with a key takeaway. "
+        "No emojis unless the persona explicitly uses them."
     ),
 }
 
@@ -61,6 +63,7 @@ def _build_system_prompt(platform: str, persona_context: str) -> str:
         "- Never use filler phrases like 'In today's world', 'It's important to note', or 'Dive into'\n"
         "- Be specific — use numbers, examples, and concrete details over vague claims\n"
         "- Write like a human, not a marketing bot\n"
+        "- No emojis on Twitter/X. On other platforms use at most 1-2 only when they add real meaning — never as decoration\n"
         "- Always return valid JSON as instructed"
     )
 
@@ -124,12 +127,21 @@ async def generate_long_form(
 ) -> FormattedContent:
     system = _build_system_prompt(platform, persona_context)
     instruction = CONTENT_TYPE_INSTRUCTIONS.get(content_type, CONTENT_TYPE_INSTRUCTIONS["long_form"])
+
+    if content_type == "thread":
+        json_format = (
+            '{"title": "...", '
+            '"tweets": ["tweet 1 text (no numbering, just the text)", "tweet 2 text", ...], '
+            '"score": 8, "score_reason": "..."}'
+        )
+    else:
+        json_format = '{"title": "...", "body": "...", "hashtags": ["..."], "score": 8, "score_reason": "..."}'
+
     user_msg = (
         f"Topic: {topic}\n\n"
         f"Current sentiment & trends:\n{sentiment_context or 'No recent data — use your knowledge.'}\n\n"
         f"Task: {instruction}\n\n"
-        f"Return JSON:\n"
-        f'{{"title": "...", "body": "...", "hashtags": ["..."], "score": 8, "score_reason": "..."}}'
+        f"Return JSON:\n{json_format}"
     )
 
     response = await get_openai().chat.completions.create(
@@ -141,8 +153,16 @@ async def generate_long_form(
     )
 
     data = json.loads(response.choices[0].message.content)
-    body = data.get("body", "")
-    hashtags = data.get("hashtags", [])
+
+    if content_type == "thread" and "tweets" in data:
+        tweets = data["tweets"]
+        numbered = [f"{i+1}/{len(tweets)} {t}" for i, t in enumerate(tweets)]
+        body = "\n\n---\n\n".join(numbered)
+        hashtags = data.get("hashtags", [])
+    else:
+        body = data.get("body", "")
+        hashtags = data.get("hashtags", [])
+
     formatted = format_content(platform, body, content_type, hashtags)
     formatted.meta.update({
         "title": data.get("title", ""),
@@ -166,7 +186,8 @@ async def generate_for_all_platforms(
         f"Given a topic, write platform-native content for all four major platforms in one response.\n\n"
         f"User persona:\n{persona_context or 'Not specified.'}\n\n"
         "Rules: each platform version must feel native — not copy-pasted. "
-        "Match each platform's tone, format, and length expectations exactly."
+        "Match each platform's tone, format, and length expectations exactly. "
+        "No emojis on Twitter/X. Other platforms: at most 1-2 emojis, only when they add meaning."
     )
     user_msg = (
         f"Topic: {topic}\n\n"
@@ -333,6 +354,7 @@ async def adapt_to_platform(
         "- Add platform-appropriate elements (hashtags for Instagram, numbered tweets for Twitter threads, etc.)\n"
         "- Never use filler phrases\n"
         "- Write like a human, not a marketing bot\n"
+        "- No emojis on Twitter/X. Other platforms: at most 1-2, only when they add real meaning\n"
         "- Always return valid JSON as instructed"
     )
     user_msg = (

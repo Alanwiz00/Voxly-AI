@@ -43,15 +43,15 @@ def _split_thread(text: str, char_limit: int = 270) -> list[str]:
 
 def format_for_twitter(content: str, content_type: str) -> FormattedContent:
     if content_type == "thread":
-        tweets = _split_thread(content)
+        # content is pre-formatted as "1/N text\n\n---\n\n2/N text..." by the generator
+        tweets = [t.strip() for t in content.split("\n\n---\n\n") if t.strip()]
         return FormattedContent(
             platform="twitter",
             content_type="thread",
-            body="\n\n---\n\n".join(tweets),
+            body=content,
             meta={"tweet_count": len(tweets), "tweets": tweets},
         )
     if content_type in LONG_FORM_TYPES:
-        # Article stored as-is; thread splitting already handled above
         return FormattedContent(platform="twitter", content_type=content_type, body=content, meta={})
     # Short idea — truncate to single tweet
     body = content[:277] + "..." if len(content) > 280 else content

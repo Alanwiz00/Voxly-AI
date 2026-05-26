@@ -164,11 +164,17 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
         if not results:
             reply = "No content was generated. Please try a more specific topic."
+        elif len(results) == 1:
+            r = results[0]
+            title = r.get("title") or ""
+            body = r["content"].replace("\n\n---\n\n", "\n\n")
+            reply = f"**{title}**\n\n{body}" if title else body
         else:
-            parts = [
-                f"**{r.get('title') or 'Untitled'}**\n\n{r['content']}"
-                for r in results
-            ]
+            parts = []
+            for i, r in enumerate(results, 1):
+                title = r.get("title") or f"Option {i}"
+                body = r["content"].replace("\n\n---\n\n", "\n\n")
+                parts.append(f"**Option {i}: {title}**\n\n{body}")
             reply = "\n\n---\n\n".join(parts)
 
     except httpx.HTTPStatusError as e:
