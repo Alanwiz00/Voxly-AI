@@ -182,11 +182,13 @@ Copy the `agent1q…` address — you will need it for Agentverse registration a
 
 ### Register on Agentverse
 
+The agent will log `Agent mailbox not found` on every poll until you complete this step — that warning is expected and harmless. The agent stays running.
+
 1. Go to [agentverse.ai](https://agentverse.ai) and sign in
-2. Click **New Agent** → **Connect local agent**
+2. Click **New Agent** → **Connect local agent** (or **My Agents** → **+ New Agent**)
 3. Paste the `agent1q…` address from the logs
 4. Give it a name (e.g. `VoxlyAI Content Generator`) and a description
-5. Click **Connect** — the agent's mailbox is now active
+5. Click **Connect** — the mailbox is now active and the warning disappears on the next poll
 
 Once connected, the agent is discoverable in the Agentverse marketplace and other agents can message it without a direct network connection to your server.
 

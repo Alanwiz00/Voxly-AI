@@ -162,5 +162,11 @@ async def startup(ctx: Context):
     ctx.logger.info("=" * 60)
 
 
+@agent.on_interval(period=30.0)
+async def heartbeat(ctx: Context):
+    """Keep the event loop alive and log periodic status."""
+    ctx.logger.debug("Heartbeat — listening for messages via Agentverse mailbox")
+
+
 if __name__ == "__main__":
     agent.run()
