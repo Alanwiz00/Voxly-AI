@@ -1,13 +1,9 @@
 import base64
 import io
-import asyncio
+import httpx
 import pdfplumber
 import docx
-from firecrawl import FirecrawlApp
-from core.config import settings
 from services.sentiment import get_openai
-
-_firecrawl: FirecrawlApp | None = None
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 IMAGE_MIME_TYPES = {
@@ -18,13 +14,6 @@ IMAGE_MIME_TYPES = {
     ".gif": "image/gif",
     ".bmp": "image/bmp",
 }
-
-
-def get_firecrawl() -> FirecrawlApp:
-    global _firecrawl
-    if _firecrawl is None:
-        _firecrawl = FirecrawlApp(api_key=settings.FIRECRAWL_API_KEY)
-    return _firecrawl
 
 
 def extract_from_pdf(file_bytes: bytes) -> str:
@@ -76,17 +65,13 @@ async def extract_from_image(file_bytes: bytes, mime_type: str) -> str:
 
 
 async def extract_from_url(url: str) -> str:
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        None,
-        lambda: get_firecrawl().scrape_url(url, params={"formats": ["markdown"]}),
-    )
-    # firecrawl-py 1.x returns a ScrapeResponse object, not a dict
-    if isinstance(result, dict):
-        markdown = result.get("markdown", "")
-    else:
-        markdown = getattr(result, "markdown", None) or ""
-    return markdown[:12000]
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"https://r.jina.ai/{url}",
+            headers={"Accept": "text/markdown", "X-Return-Format": "markdown"},
+        )
+        resp.raise_for_status()
+        return resp.text[:12000]
 
 
 def extract_from_text(text: str) -> str:

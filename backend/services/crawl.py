@@ -1,17 +1,9 @@
 import asyncio
-from firecrawl import FirecrawlApp
+import httpx
 from tavily import TavilyClient
 from core.config import settings
 
-_firecrawl: FirecrawlApp | None = None
 _tavily: TavilyClient | None = None
-
-
-def get_firecrawl() -> FirecrawlApp:
-    global _firecrawl
-    if _firecrawl is None:
-        _firecrawl = FirecrawlApp(api_key=settings.FIRECRAWL_API_KEY)
-    return _firecrawl
 
 
 def get_tavily() -> TavilyClient:
@@ -33,16 +25,13 @@ async def search_topic_urls(topic_name: str, keywords: str | None, max_results: 
 
 async def extract_content(url: str) -> str | None:
     try:
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: get_firecrawl().scrape_url(url, params={"formats": ["markdown"]}),
-        )
-        if isinstance(result, dict):
-            markdown = result.get("markdown", "")
-        else:
-            markdown = getattr(result, "markdown", None) or ""
-        return markdown[:8000]
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                f"https://r.jina.ai/{url}",
+                headers={"Accept": "text/markdown", "X-Return-Format": "markdown"},
+            )
+            resp.raise_for_status()
+            return resp.text[:8000]
     except Exception:
         return None
 
