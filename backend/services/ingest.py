@@ -79,9 +79,9 @@ async def extract_from_url(url: str) -> str:
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
         None,
-        lambda: get_firecrawl().scrape_url(url, formats=["markdown"]),
+        lambda: get_firecrawl().scrape_url(url, params={"formats": ["markdown"]}),
     )
-    # firecrawl-py 1.x returns a ScrapeResponse object; older versions returned a dict
+    # firecrawl-py 1.x returns a ScrapeResponse object, not a dict
     if isinstance(result, dict):
         markdown = result.get("markdown", "")
     else:
