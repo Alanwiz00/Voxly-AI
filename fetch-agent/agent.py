@@ -1,7 +1,15 @@
 """VoxlyAI Fetch.ai uAgent — receives content generation requests via Agentverse."""
 import os
 import httpx
+from datetime import datetime, timezone
+from uuid import uuid4
 from uagents import Agent, Context, Model, Protocol
+from uagents_core.contrib.protocols.chat import (
+    ChatAcknowledgement,
+    ChatMessage,
+    TextContent,
+    chat_protocol_spec,
+)
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,7 +20,6 @@ AGENT_SEED = os.environ["AGENT_SEED"]
 AGENT_NAME = os.environ.get("AGENT_NAME", "voxlyai-content-generator")
 AGENT_PORT = int(os.environ.get("AGENT_PORT", "8002"))
 AGENT_INSPECTOR = os.environ.get("AGENT_INSPECTOR", "true").lower() == "true"
-# Public HTTPS URL Agentverse uses to deliver messages, e.g. https://agent.yourdomain.com/submit
 AGENT_ENDPOINT = os.environ.get("AGENT_ENDPOINT", "")
 
 agent = Agent(
@@ -22,7 +29,6 @@ agent = Agent(
     endpoint=AGENT_ENDPOINT if AGENT_ENDPOINT else None,
     mailbox=not bool(AGENT_ENDPOINT),
     enable_agent_inspector=AGENT_INSPECTOR,
-    # Description is read by DeltaV to match user queries — write it as user intent
     description=(
         "Generate social media content, posts, tweets, threads, and articles using AI. "
         "Create engaging content for Twitter, Instagram, Facebook, and Telegram. "
@@ -32,19 +38,10 @@ agent = Agent(
     ),
     metadata={
         "tags": [
-            "content-generation",
-            "social-media",
-            "copywriting",
-            "twitter",
-            "instagram",
-            "facebook",
-            "telegram",
-            "ai-writing",
-            "marketing",
-            "content-creation",
-            "threads",
-            "articles",
-            "brand-voice",
+            "content-generation", "social-media", "copywriting",
+            "twitter", "instagram", "facebook", "telegram",
+            "ai-writing", "marketing", "content-creation",
+            "threads", "articles", "brand-voice",
         ],
         "category": "content-generation",
         "author": "VoxlyAI",
@@ -53,7 +50,7 @@ agent = Agent(
 )
 
 # ---------------------------------------------------------------------------
-# HTTP client — lazy, shared for the process lifetime
+# HTTP client
 # ---------------------------------------------------------------------------
 
 _http: httpx.AsyncClient | None = None
@@ -71,20 +68,141 @@ def _client() -> httpx.AsyncClient:
 
 
 # ---------------------------------------------------------------------------
-# Message models
+# Intent parser — extracts platform / content_type / topic from plain text
+# ---------------------------------------------------------------------------
+
+def _parse_intent(text: str) -> tuple[str, str, str]:
+    t = text.lower()
+
+    if any(w in t for w in ["twitter", "tweet", "x.com"]):
+        platform = "twitter"
+    elif any(w in t for w in ["instagram", "insta", " ig "]):
+        platform = "instagram"
+    elif any(w in t for w in ["facebook", " fb "]):
+        platform = "facebook"
+    elif "telegram" in t:
+        platform = "telegram"
+    else:
+        platform = "twitter"
+
+    if "thread" in t:
+        content_type = "thread"
+    elif any(w in t for w in ["article", "blog", "essay"]):
+        content_type = "article"
+    elif any(w in t for w in ["long-form", "long form", "longform"]):
+        content_type = "long_form"
+    else:
+        content_type = "idea"
+
+    filler = [
+        "write me", "generate me", "create me", "give me", "make me",
+        "write", "generate", "create", "produce", "draft", "make",
+        "a twitter", "an instagram", "a facebook", "a telegram",
+        "twitter", "instagram", "facebook", "telegram", "tweet",
+        "thread", "post", "article", "ideas", "idea", "content", "caption",
+        "about", "regarding", "related to", "please", "can you",
+    ]
+    topic = text
+    for w in sorted(filler, key=len, reverse=True):
+        topic = topic.lower().replace(w, " ")
+    topic = " ".join(topic.split()).strip()
+
+    return platform, content_type, topic or text
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+# ---------------------------------------------------------------------------
+# AgentChatProtocol — handles DeltaV / Agentverse chat interface
+# ---------------------------------------------------------------------------
+
+chat_proto = Protocol(spec=chat_protocol_spec)
+
+
+@chat_proto.on_message(ChatMessage, replies={ChatAcknowledgement, ChatMessage})
+async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
+    # Acknowledge immediately so the sender knows the message was received
+    await ctx.send(sender, ChatAcknowledgement(
+        timestamp=_now(),
+        acknowledged_msg_id=msg.msg_id,
+        metadata=None,
+    ))
+
+    # Extract plain text from the content array
+    text = " ".join(
+        item.text for item in msg.content
+        if hasattr(item, "type") and item.type == "text"
+    ).strip()
+
+    ctx.logger.info(f"Chat message from {sender[:20]}…: {text[:80]}")
+
+    if not text:
+        await ctx.send(sender, ChatMessage(
+            timestamp=_now(),
+            msg_id=str(uuid4()),
+            content=[TextContent(type="text", text=(
+                "Hi! Tell me what content you'd like to generate.\n\n"
+                "Example: \"Write a Twitter thread about AI in healthcare\""
+            ))],
+        ))
+        return
+
+    platform, content_type, topic = _parse_intent(text)
+    ctx.logger.info(f"Parsed → platform={platform} type={content_type} topic={topic}")
+
+    try:
+        resp = await _client().post("/generate/", json={
+            "topic_name": topic,
+            "platform": platform,
+            "content_type": content_type,
+            "idea_count": 4,
+        })
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+
+        if not results:
+            reply = "No content was generated. Please try a more specific topic."
+        else:
+            parts = [
+                f"**{r.get('title') or 'Untitled'}**\n\n{r['content']}"
+                for r in results
+            ]
+            reply = "\n\n---\n\n".join(parts)
+
+    except httpx.HTTPStatusError as e:
+        detail = e.response.json().get("detail", str(e)) if e.response.content else str(e)
+        ctx.logger.error(f"API error: {detail}")
+        reply = f"Sorry, the content generator returned an error: {detail}"
+    except Exception as e:
+        ctx.logger.error(f"Chat generate failed: {e}")
+        reply = f"Sorry, something went wrong: {e}"
+
+    await ctx.send(sender, ChatMessage(
+        timestamp=_now(),
+        msg_id=str(uuid4()),
+        content=[TextContent(type="text", text=reply)],
+    ))
+
+
+@chat_proto.on_message(ChatAcknowledgement, replies=set())
+async def handle_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
+    ctx.logger.debug(f"Ack from {sender[:20]}… for msg {msg.acknowledged_msg_id}")
+
+
+agent.include(chat_proto, publish_manifest=True)
+
+
+# ---------------------------------------------------------------------------
+# VoxlyAI typed protocol — for agent-to-agent use
 # ---------------------------------------------------------------------------
 
 class GenerateRequest(Model):
-    """Generate AI-powered social media content for a given topic and platform.
+    """Generate AI-powered social media content.
 
-    Send this to request content creation. VoxlyAI will use the configured
-    brand voice and writing style to produce on-brand posts, threads, or articles.
-
-    topic:        subject or theme to write about (e.g. "AI in healthcare", "product launch")
     platform:     twitter | instagram | facebook | telegram
     content_type: idea | long_form | thread | article
-    idea_count:   how many content ideas to generate (default 4, applies to content_type=idea)
-    persona_id:   optional — pin to a specific writing persona; omit to auto-select
     """
     topic: str
     platform: str
@@ -94,17 +212,12 @@ class GenerateRequest(Model):
 
 
 class GenerateResponse(Model):
-    """Response containing the generated content pieces, or an error message."""
     results: list[str]
     error: str | None = None
 
 
 class ListTopicsRequest(Model):
-    """List all saved content topics in VoxlyAI.
-
-    Topics are recurring subjects used for content planning and generation.
-    Returns topic IDs you can reference when calling GenerateRequest.
-    """
+    """List all saved VoxlyAI topics."""
     pass
 
 
@@ -114,11 +227,7 @@ class ListTopicsResponse(Model):
 
 
 class ListPersonasRequest(Model):
-    """List all writing personas configured in VoxlyAI.
-
-    Each persona has a distinct brand voice, tone, niche, and target audience.
-    Returns persona IDs you can pass to GenerateRequest to pin a specific style.
-    """
+    """List all VoxlyAI writing personas."""
     pass
 
 
@@ -126,10 +235,6 @@ class ListPersonasResponse(Model):
     personas: list[dict]
     error: str | None = None
 
-
-# ---------------------------------------------------------------------------
-# Protocol
-# ---------------------------------------------------------------------------
 
 voxlyai = Protocol(name="VoxlyAI", version="1.0.0")
 
@@ -146,44 +251,35 @@ async def handle_generate(ctx: Context, sender: str, msg: GenerateRequest):
         }
         if msg.persona_id is not None:
             payload["persona_id"] = msg.persona_id
-
         resp = await _client().post("/generate/", json=payload)
         resp.raise_for_status()
         raw = resp.json().get("results", [])
-        results = [
-            f"{r.get('title') or 'Untitled'}\n\n{r['content']}" for r in raw
-        ]
+        results = [f"{r.get('title') or 'Untitled'}\n\n{r['content']}" for r in raw]
         await ctx.send(sender, GenerateResponse(results=results))
     except httpx.HTTPStatusError as e:
         detail = e.response.json().get("detail", str(e)) if e.response.content else str(e)
-        ctx.logger.error(f"API error: {detail}")
         await ctx.send(sender, GenerateResponse(results=[], error=detail))
     except Exception as e:
-        ctx.logger.error(f"Generate failed: {e}")
         await ctx.send(sender, GenerateResponse(results=[], error=str(e)))
 
 
 @voxlyai.on_message(model=ListTopicsRequest, replies=ListTopicsResponse)
 async def handle_list_topics(ctx: Context, sender: str, msg: ListTopicsRequest):
-    ctx.logger.info(f"ListTopicsRequest from {sender[:20]}…")
     try:
         resp = await _client().get("/topics/")
         resp.raise_for_status()
         await ctx.send(sender, ListTopicsResponse(topics=resp.json()))
     except Exception as e:
-        ctx.logger.error(f"ListTopics failed: {e}")
         await ctx.send(sender, ListTopicsResponse(topics=[], error=str(e)))
 
 
 @voxlyai.on_message(model=ListPersonasRequest, replies=ListPersonasResponse)
 async def handle_list_personas(ctx: Context, sender: str, msg: ListPersonasRequest):
-    ctx.logger.info(f"ListPersonasRequest from {sender[:20]}…")
     try:
         resp = await _client().get("/persona/")
         resp.raise_for_status()
         await ctx.send(sender, ListPersonasResponse(personas=resp.json()))
     except Exception as e:
-        ctx.logger.error(f"ListPersonas failed: {e}")
         await ctx.send(sender, ListPersonasResponse(personas=[], error=str(e)))
 
 
@@ -209,7 +305,6 @@ async def startup(ctx: Context):
                 register_chat_agent,
                 RegistrationRequestCredentials,
             )
-            # Ensure the endpoint has a scheme — Agentverse rejects bare hostnames
             endpoint = AGENT_ENDPOINT if AGENT_ENDPOINT.startswith("https://") else f"https://{AGENT_ENDPOINT}"
             register_chat_agent(
                 "Voxly AI",
@@ -229,8 +324,7 @@ async def startup(ctx: Context):
 
 @agent.on_interval(period=30.0)
 async def heartbeat(ctx: Context):
-    """Keep the event loop alive and log periodic status."""
-    ctx.logger.debug("Heartbeat — listening for messages via Agentverse mailbox")
+    ctx.logger.debug("Heartbeat — listening for messages")
 
 
 if __name__ == "__main__":
