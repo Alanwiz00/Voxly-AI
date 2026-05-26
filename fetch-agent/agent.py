@@ -209,9 +209,11 @@ async def startup(ctx: Context):
                 register_chat_agent,
                 RegistrationRequestCredentials,
             )
+            # Ensure the endpoint has a scheme — Agentverse rejects bare hostnames
+            endpoint = AGENT_ENDPOINT if AGENT_ENDPOINT.startswith("https://") else f"https://{AGENT_ENDPOINT}"
             register_chat_agent(
                 "Voxly AI",
-                AGENT_ENDPOINT,
+                endpoint,
                 active=True,
                 credentials=RegistrationRequestCredentials(
                     agentverse_api_key=agentverse_key,
