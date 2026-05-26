@@ -121,7 +121,7 @@ def _now() -> datetime:
 chat_proto = Protocol(spec=chat_protocol_spec)
 
 
-@chat_proto.on_message(ChatMessage, replies={ChatAcknowledgement})
+@chat_proto.on_message(ChatMessage)
 async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
     # Acknowledge immediately so the sender knows the message was received
     await ctx.send(sender, ChatAcknowledgement(
@@ -186,7 +186,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
     ))
 
 
-@chat_proto.on_message(ChatAcknowledgement, replies=set())
+@chat_proto.on_message(ChatAcknowledgement)
 async def handle_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
     ctx.logger.debug(f"Ack from {sender[:20]}… for msg {msg.acknowledged_msg_id}")
 
