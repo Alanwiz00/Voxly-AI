@@ -1,17 +1,9 @@
 import asyncio
-from firecrawl import FirecrawlApp
+import trafilatura
 from tavily import TavilyClient
 from core.config import settings
 
-_firecrawl: FirecrawlApp | None = None
 _tavily: TavilyClient | None = None
-
-
-def get_firecrawl() -> FirecrawlApp:
-    global _firecrawl
-    if _firecrawl is None:
-        _firecrawl = FirecrawlApp(api_key=settings.FIRECRAWL_API_KEY)
-    return _firecrawl
 
 
 def get_tavily() -> TavilyClient:
@@ -31,18 +23,18 @@ async def search_topic_urls(topic_name: str, keywords: str | None, max_results: 
     return [r["url"] for r in results.get("results", []) if r.get("url")]
 
 
+def _trafilatura_extract(url: str) -> str:
+    downloaded = trafilatura.fetch_url(url)
+    if not downloaded:
+        return ""
+    return trafilatura.extract(downloaded, output_format="markdown", include_links=False) or ""
+
+
 async def extract_content(url: str) -> str | None:
     try:
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: get_firecrawl().scrape_url(url, params={"formats": ["markdown"]}),
-        )
-        if isinstance(result, dict):
-            markdown = result.get("markdown", "")
-        else:
-            markdown = getattr(result, "markdown", None) or ""
-        return markdown[:8000]
+        text = await loop.run_in_executor(None, _trafilatura_extract, url)
+        return text[:8000] if text.strip() else None
     except Exception:
         return None
 

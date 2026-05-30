@@ -11,7 +11,6 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str
     OPENAI_API_KEY: str
     REDIS_URL: str = "redis://localhost:6379/0"
-    FIRECRAWL_API_KEY: str
     TAVILY_API_KEY: str
     NEXTAUTH_SECRET: str
 
