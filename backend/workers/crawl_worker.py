@@ -109,10 +109,10 @@ async def _crawl_and_store(topic_id: int, topic_name: str, keywords: str | None,
     await upsert_points(settings.SENTIMENT_COLLECTION, points)
 
     async with AsyncSessionLocal() as db:
-        db.add_all(crawl_records)
         await db.execute(
             update(Topic).where(Topic.id == topic_id).values(last_crawled_at=datetime.now(timezone.utc))
         )
+        db.add_all(crawl_records)
         await db.commit()
 
     # Auto-generate reusable content from the fresh crawl data
