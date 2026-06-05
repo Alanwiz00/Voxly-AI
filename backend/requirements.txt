@@ -30,7 +30,7 @@ flower==2.0.1
 
 # Web crawling & search
 trafilatura==2.0.0
-tavily-python==0.5.0
+duckduckgo-search==6.4.3
 
 # File ingestion
 pdfplumber==0.11.4

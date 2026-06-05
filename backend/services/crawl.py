@@ -1,16 +1,6 @@
 import asyncio
 import trafilatura
-from tavily import TavilyClient
-from core.config import settings
-
-_tavily: TavilyClient | None = None
-
-
-def get_tavily() -> TavilyClient:
-    global _tavily
-    if _tavily is None:
-        _tavily = TavilyClient(api_key=settings.TAVILY_API_KEY)
-    return _tavily
+from duckduckgo_search import DDGS
 
 
 async def search_topic_urls(topic_name: str, keywords: str | None, max_results: int = 8) -> list[str]:
@@ -18,9 +8,9 @@ async def search_topic_urls(topic_name: str, keywords: str | None, max_results: 
     loop = asyncio.get_event_loop()
     results = await loop.run_in_executor(
         None,
-        lambda: get_tavily().search(query=query, max_results=max_results, search_depth="advanced"),
+        lambda: list(DDGS().text(query, max_results=max_results)),
     )
-    return [r["url"] for r in results.get("results", []) if r.get("url")]
+    return [r["href"] for r in results if r.get("href")]
 
 
 def _trafilatura_extract(url: str) -> str:
