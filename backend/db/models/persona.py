@@ -13,7 +13,7 @@ class PersonaProfile(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     niche: Mapped[str | None] = mapped_column(String(255))
     target_audience: Mapped[str | None] = mapped_column(Text)
-    tone: Mapped[str | None] = mapped_column(String(100))
+    tone: Mapped[str | None] = mapped_column(Text)
     brand_voice: Mapped[str | None] = mapped_column(Text)
     writing_style_notes: Mapped[str | None] = mapped_column(Text)
     sample_content: Mapped[str | None] = mapped_column(Text)

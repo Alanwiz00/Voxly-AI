@@ -9,4 +9,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY . .
 
+RUN mkdir -p /data
+
 CMD ["python", "agent.py"]

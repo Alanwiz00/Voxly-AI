@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from db.postgres import init_db
 from db.qdrant import ensure_collections
-from api.routes import auth, users, topics, generate, content, persona, api_keys
+from api.routes import auth, users, topics, generate, content, persona, api_keys, analyze
 
 
 @asynccontextmanager
@@ -33,6 +33,7 @@ async def _migrate_db() -> None:
     from db.postgres import engine
     async with engine.begin() as conn:
         for stmt in [
+            "ALTER TABLE persona_profiles ALTER COLUMN tone TYPE TEXT",
             "ALTER TABLE persona_profiles ADD COLUMN IF NOT EXISTS learned_style TEXT",
             "ALTER TABLE persona_profiles ADD COLUMN IF NOT EXISTS style_synthesized_at TIMESTAMPTZ",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
@@ -103,6 +104,7 @@ app.include_router(generate.router)
 app.include_router(content.router)
 app.include_router(persona.router)
 app.include_router(api_keys.router)
+app.include_router(analyze.router)
 
 
 @app.get("/health")

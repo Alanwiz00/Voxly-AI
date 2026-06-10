@@ -1,7 +1,7 @@
 import asyncio
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # Ensure /app is on the path for prefork child processes
 if "/app" not in sys.path:
@@ -31,7 +31,7 @@ celery_app.conf.update(
     beat_schedule={
         "crawl-all-topics-every-6h": {
             "task": "workers.crawl_worker.crawl_all_active_topics",
-            "schedule": settings.CRAWL_INTERVAL_HOURS * 3600,
+            "schedule": timedelta(hours=settings.CRAWL_INTERVAL_HOURS),
         }
     },
 )

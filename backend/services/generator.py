@@ -6,10 +6,10 @@ from services.formatter import format_content, FormattedContent
 
 PLATFORM_INSTRUCTIONS = {
     "twitter": (
-        "Twitter/X. Audience scrolls fast — lead with a bold hook. "
-        "Use short punchy sentences. Numbers, contrarian takes, and questions perform well. "
-        "For threads: first tweet must standalone as a hook. No corporate speak. "
-        "No emojis — plain text outperforms emoji-heavy posts on X."
+        "Twitter/X. Max 250 characters. Lead with the FACT — a real stat, name, or event from the source. "
+        "No vague claims. No invented context. Every sentence must be traceable to the source material. "
+        "Short punchy sentences. Plain text — no emojis, no hashtags unless essential. "
+        "NEVER ask a question. Write declarative statements only. Never start with 'I'."
     ),
     "instagram": (
         "Instagram. The first line must stop the scroll before 'more' is tapped. "

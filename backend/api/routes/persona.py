@@ -1,4 +1,7 @@
+import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks
+
+log = logging.getLogger(__name__)
 from pydantic import BaseModel
 from sqlalchemy import select, func
 from api.deps import CurrentUser, DB
@@ -78,7 +81,11 @@ async def create_persona(body: PersonaCreate, current_user: CurrentUser, db: DB)
     await db.refresh(persona)
 
     data = PersonaData(**body.model_dump(exclude={"name"}))
-    await embed_persona(persona.id, current_user.id, data)
+    try:
+        await embed_persona(persona.id, current_user.id, data)
+    except Exception as exc:
+        log.error("embed_persona failed for persona %d: %s", persona.id, exc, exc_info=True)
+        # Persona is saved in DB — return it anyway. Embedding can be retried via PUT.
     return PersonaResponse.from_orm_ext(persona)
 
 
@@ -98,7 +105,10 @@ async def update_persona(persona_id: int, body: PersonaUpdate, current_user: Cur
     await db.refresh(persona)
 
     data = PersonaData(**{f: getattr(persona, f) for f in PersonaData.model_fields})
-    await embed_persona(persona.id, current_user.id, data, learned_style=persona.learned_style)
+    try:
+        await embed_persona(persona.id, current_user.id, data, learned_style=persona.learned_style)
+    except Exception as exc:
+        log.error("embed_persona failed for persona %d: %s", persona.id, exc, exc_info=True)
     return PersonaResponse.from_orm_ext(persona)
 
 

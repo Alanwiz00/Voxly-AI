@@ -1,6 +1,6 @@
 import asyncio
 import trafilatura
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 
 async def search_topic_urls(topic_name: str, keywords: str | None, max_results: int = 8) -> list[str]:

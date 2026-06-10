@@ -77,7 +77,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    command: celery -A workers.crawl_worker.celery_app beat --loglevel=info
+    command: celery -A workers.crawl_worker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     volumes:
       - ./backend:/app
 
@@ -126,6 +126,38 @@ services:
       backend:
         condition: service_healthy
 
+  beteye-agent:
+    build: ./beteye-agent
+    restart: unless-stopped
+    environment:
+      - VOXLY_API_URL=http://backend:8000
+      - VOXLY_API_KEY=${BETEYE_API_KEY}
+      - PERSONA_ID=${BETEYE_PERSONA_ID:-}
+      - COLLECT_INTERVAL_MINS=${BETEYE_COLLECT_INTERVAL_MINS:-30}
+      - FALLBACK_POST_HOURS=${BETEYE_FALLBACK_POST_HOURS:-4}
+      - POSTS_PER_RUN=${BETEYE_POSTS_PER_RUN:-4}
+      - MIN_QUEUE_THRESHOLD=${BETEYE_MIN_QUEUE_THRESHOLD:-2}
+      - MIN_POST_GAP_MINS=${BETEYE_MIN_POST_GAP_MINS:-45}
+      - BREAKING_SCORE_THRESHOLD=${BETEYE_BREAKING_SCORE_THRESHOLD:-6}
+      - DRY_RUN=${BETEYE_DRY_RUN:-false}
+      - ENABLE_REPLIES=${BETEYE_ENABLE_REPLIES:-false}
+      - MATCHDAY_COLLECT_MINS=${BETEYE_MATCHDAY_COLLECT_MINS:-10}
+      - X_API_KEY=${X_API_KEY}
+      - X_API_SECRET=${X_API_SECRET}
+      - X_ACCESS_TOKEN=${X_ACCESS_TOKEN}
+      - X_ACCESS_TOKEN_SECRET=${X_ACCESS_TOKEN_SECRET}
+      - EXTRA_NEWS_FEEDS=${BETEYE_EXTRA_NEWS_FEEDS:-}
+      - EXTRA_X_ACCOUNTS=${BETEYE_EXTRA_X_ACCOUNTS:-}
+      - EXTRA_YOUTUBE_CHANNELS=${BETEYE_EXTRA_YOUTUBE_CHANNELS:-}
+      - MAX_CONTENT_AGE_HOURS=${BETEYE_MAX_CONTENT_AGE_HOURS:-2}
+      - TRANSCRIPT_MAX_CHARS=${BETEYE_TRANSCRIPT_MAX_CHARS:-2000}
+    volumes:
+      - ./beteye-agent:/app
+      - beteye-data:/data
+    depends_on:
+      backend:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./frontend
@@ -149,3 +181,6 @@ services:
       - ./frontend:/app
       - /app/node_modules
       - /app/.next
+
+volumes:
+  beteye-data:

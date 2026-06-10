@@ -131,6 +131,7 @@ async def generate_from_source(
     url: str | None = Form(None),
     file: UploadFile | None = File(None),
     idea_count: int = Form(4),
+    persona_id: int | None = Form(None),
 ):
     file_bytes = await file.read() if file else None
     file_type = None
@@ -151,7 +152,10 @@ async def generate_from_source(
         raise HTTPException(status_code=400, detail="Could not extract content from the provided source.")
 
     topic_name = f"Custom source ({(url or file.filename if file else 'text')[:60]})"
-    persona_context = await get_best_persona_context(current_user.id, topic_name)
+    if persona_id:
+        persona_context = await get_persona_context_by_id(persona_id, topic_name)
+    else:
+        persona_context = await get_best_persona_context(current_user.id, topic_name)
 
     if content_type == "idea":
         formatted_list = await generate_post_ideas(
