@@ -22,7 +22,7 @@ def _get_client() -> tweepy.Client:
 
 def post_tweet(text: str, reply_to_id: str | None = None) -> str:
     """Post a tweet and return the tweet ID. Optionally post as a reply."""
-    kwargs: dict = {"text": text[:280]}
+    kwargs: dict = {"text": text[:4000]}  # X Premium Basic limit
     if reply_to_id:
         kwargs["reply"] = {"in_reply_to_tweet_id": reply_to_id}
     response = _get_client().create_tweet(**kwargs)
