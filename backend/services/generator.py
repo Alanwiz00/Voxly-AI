@@ -6,10 +6,12 @@ from services.formatter import format_content, FormattedContent
 
 PLATFORM_INSTRUCTIONS = {
     "twitter": (
-        "Twitter/X. Max 250 characters. Lead with the FACT — a real stat, name, or event from the source. "
-        "No vague claims. No invented context. Every sentence must be traceable to the source material. "
-        "Short punchy sentences. Plain text — no emojis, no hashtags unless essential. "
-        "NEVER ask a question. Write declarative statements only. Never start with 'I'."
+        "Twitter/X (X Premium — long posts supported). "
+        "Follow the FORMAT TEMPLATE in the task exactly — structure, line breaks, and length. "
+        "Every fact must be traceable to the source material. No invented context. "
+        "Plain text only — no emojis, no hashtags, no markdown symbols like * or **. "
+        "NEVER mention a media outlet, publication, or website by name. "
+        "NEVER ask a question. Declarative statements only. Never start with 'I'."
     ),
     "instagram": (
         "Instagram. The first line must stop the scroll before 'more' is tapped. "

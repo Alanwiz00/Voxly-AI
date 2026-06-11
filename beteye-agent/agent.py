@@ -47,6 +47,7 @@ MIN_POST_GAP_MINS     = float(os.environ.get("MIN_POST_GAP_MINS", "45"))
 BREAKING_SCORE        = int(os.environ.get("BREAKING_SCORE_THRESHOLD", "6"))
 DRY_RUN               = os.environ.get("DRY_RUN", "false").lower() == "true"
 ENABLE_REPLIES        = os.environ.get("ENABLE_REPLIES", "false").lower() == "true"
+POST_INTERVAL_SECS    = int(os.environ.get("POST_INTERVAL_SECS", "180"))  # gap between posts in a run
 
 DATA_DIR     = Path("/data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -61,28 +62,60 @@ MIN_POSTS_FOR_ANALYSIS = int(os.environ.get("MIN_POSTS_FOR_ANALYSIS", "5"))
 # ---------------------------------------------------------------------------
 # Relevance scoring
 # ---------------------------------------------------------------------------
-MIN_ITEM_SCORE = int(os.environ.get("MIN_ITEM_SCORE", "2"))
+MIN_ITEM_SCORE = int(os.environ.get("MIN_ITEM_SCORE", "3"))
+
+# Must contain at least one of these to even be considered — prevents generic football noise
+WC_CORE_TERMS = {
+    "world cup", "worldcup", "wc2026", "2026 world cup", "world cup 2026",
+    "usa 2026", "canada 2026", "mexico 2026",
+    "group stage", "knockout stage", "quarterfinal", "semifinal",
+    "team sheet", "starting xi", "squad list",
+    "metlife", "sofi stadium", "azteca", "at&t stadium", "levi's stadium",
+    "fifaworldcup", "fifa world cup",
+}
+
+# Reject outright if these appear without a WC core term — club/domestic league noise
+NON_WC_BLOCKLIST = {
+    "nwsl", "premier league", "champions league", "europa league",
+    "conference league", "la liga", "serie a", "bundesliga", "ligue 1",
+    "fa cup", "efl cup", "carabao cup", "copa del rey", "coppa italia",
+    "women's super league", " wsl ", "women's champions league",
+    "wave fc", "man city", "man utd", "manchester united", "manchester city",
+    "arsenal", "chelsea", "liverpool", "tottenham", "newcastle",
+    "real madrid", "barcelona", "atletico", "juventus", "inter milan", "ac milan",
+    "psg", "paris saint-germain", "bayern munich", "borussia dortmund",
+}
 
 WC_KEYWORDS = {
     "world cup 2026": 5, "wc2026": 5, "2026 world cup": 5,
     "usa 2026": 4, "canada 2026": 4, "mexico 2026": 4,
     "metlife": 3, "sofi stadium": 3, "azteca": 3,
     "world cup": 3, "worldcup": 3,
-    "group stage": 3, "knockout": 3, "quarterfinal": 3, "semifinal": 3, "final": 2,
+    "group stage": 3, "knockout": 3, "quarterfinal": 3, "semifinal": 3,
     "qualify": 2, "qualifier": 2, "qualification": 2,
     "squad": 2, "team sheet": 3, "starting xi": 3, "lineup": 2,
     "injury": 2, "injury doubt": 3, "ruled out": 3, "fit for": 3,
     "suspended": 2, "red card": 2,
-    "transfer": 1, "signing": 1,
     "record": 2, "all-time": 2,
     "preview": 2, "prediction": 2, "odds": 2,
-    "national team": 2, "international": 1,
-    "goal": 1, "assist": 1, "hat-trick": 3,
-    "var": 2, "penalty": 2, "own goal": 2,
+    "national team": 2, "international break": 2,
+    "hat-trick": 2, "var": 2, "penalty": 2,
     "fifa": 1,
 }
 
 _HIST_YEAR_RE = re.compile(r'\b(19\d{2}|200\d|201\d|202[0-3])\b')
+
+
+def _has_wc_signal(item: dict) -> bool:
+    """Item must contain at least one core WC term. Reject if it's clearly club/domestic content."""
+    text = (item.get("title", "") + " " + item.get("summary", "")).lower()
+
+    has_core = any(t in text for t in WC_CORE_TERMS)
+    has_block = any(t in text for t in NON_WC_BLOCKLIST)
+
+    if has_block and not has_core:
+        return False
+    return has_core
 
 BANNED_PHRASES = (
     "game-changer, game changer, double high-five, let that sink in, buckle up, "
@@ -98,28 +131,87 @@ BANNED_PHRASES = (
 # ---------------------------------------------------------------------------
 POST_MODES = ["news", "stat", "take"]
 
+# Per-mode character limits — X Premium Basic allows 4,000 chars
+MODE_CHAR_LIMITS = {
+    "news":  1000,   # full story + context + CTA, no mid-sentence cuts
+    "stat":   800,   # number + full context + CTA
+    "take":  2000,   # proper opinion piece with evidence
+    "list":  4000,   # full ranked list with reasons, closing statement
+    "reply":  280,   # replies stay short — you're in someone else's thread
+}
+
+# Detect list/ranking articles that deserve a long-form treatment
+_LIST_TITLE_RE = re.compile(
+    r'\b(top \d+|ranking|ranked|power rank|best \d+|\d+ (players|countries|teams|things|reasons)|'
+    r'who to watch|ones to watch|contenders|favourites|favorites|predictions|picks)\b',
+    re.IGNORECASE,
+)
+
 MODE_INSTRUCTIONS = {
     "news": (
-        "TASK — NEWS FLASH: Write a tweet that reports the single most important fact from this story. "
-        "Sentence 1: WHO did WHAT (name + action + number if available). "
-        "Sentence 2: the concrete consequence — what changes now. "
-        "No questions. No filler. Statement only. Max 220 chars."
+        "TASK — NEWS FLASH\n"
+        "Report the single most important fact as original insight. DO NOT name any media outlet.\n\n"
+        "FORMAT — use this exact structure:\n"
+        "[Name] [verb] [object]. [One-sentence consequence].\n\n"
+        "[CTA: one short line that references THIS specific story — e.g. 'Follow @beteye for confirmed squad updates.' or 'Follow @beteye as this develops.']\n\n"
+        "Example:\n"
+        "Pedri is OUT of Spain's World Cup squad. The Barcelona midfielder ruptured his knee — "
+        "Spain lose their most creative passer before a ball is kicked.\n\n"
+        "Follow @beteye for every squad update as teams finalise their 26-man lists.\n\n"
+        "Rules: Tell the full story — who, what, why it matters. 3-5 sentences. End with 1 contextual CTA line. Max 900 chars."
     ),
     "stat": (
-        "TASK — STAT DROP: Lead with ONE specific number from this story (goals, minutes, fee, ranking). "
-        "Sentence 1: [NUMBER] [FACT] — make the number land hard. "
-        "Sentence 2: why that number is significant in context. "
-        "No questions. Declarative statements only. Max 220 chars."
+        "TASK — STAT DROP\n"
+        "Make ONE number the entire post. DO NOT credit any source.\n\n"
+        "FORMAT — use this exact structure:\n"
+        "[Number] [what it measures].\n"
+        "[One sentence of context that makes the number hit harder].\n\n"
+        "[CTA: one short line tied to the stat — e.g. 'Follow @beteye for the numbers that define this tournament.' or 'Follow @beteye for live stats as the group stage begins.']\n\n"
+        "Example:\n"
+        "8 goals in 6 World Cup games.\n"
+        "That's Mbappé's record — and he hasn't played a knockout stage yet.\n\n"
+        "Follow @beteye for every record broken at WC 2026.\n\n"
+        "Rules: Number first, full context (2-3 sentences), then 1 contextual CTA. No questions. Max 700 chars."
     ),
     "take": (
-        "TASK — SHARP TAKE: State a strong, confident opinion on this story in 1-2 sentences. "
-        "Name players, clubs, or federations directly. Anchor the take in a specific fact from the article. "
-        "No hedging words (perhaps, might, could). No questions. "
-        "Conviction over conversation. Max 220 chars."
+        "TASK — SHARP TAKE\n"
+        "State a strong, confident original opinion grounded in a fact from the article. "
+        "DO NOT credit any outlet. No 'according to', no 'reports say'.\n\n"
+        "FORMAT — use this exact structure:\n"
+        "[Bold declarative opinion — 1 sentence].\n\n"
+        "[Supporting fact that proves it — 1 sentence].\n\n"
+        "[CTA: one line inviting engagement with THIS specific take — e.g. 'Drop your pick below.' or 'Follow @beteye for the takes nobody else is giving.']\n\n"
+        "Example:\n"
+        "England have the deepest squad at this World Cup.\n\n"
+        "Bellingham, Saka, Foden, Palmer — Southgate can rotate his entire attack without losing quality.\n\n"
+        "Drop your WC winner below.\n\n"
+        "Rules: Opinion + supporting evidence (can be 3-4 paragraphs) + 1 CTA. No questions in the take. Max 1800 chars."
+    ),
+    "list": (
+        "TASK — ORIGINAL LIST POST\n"
+        "The source is a ranking or list article. Write your OWN curated version using facts inside it. "
+        "DO NOT reproduce the original list or credit the outlet.\n\n"
+        "FORMAT — use this exact structure:\n"
+        "[Hook: 1 punchy headline in ALL CAPS]\n\n"
+        "1. [Name] — [specific fact: stat, record, or squad detail]\n"
+        "2. [Name] — [specific fact]\n"
+        "3. [Name] — [specific fact]\n"
+        "4. [Name] — [specific fact]\n"
+        "5. [Name] — [specific fact]\n\n"
+        "[Closing statement tied to the list topic — e.g. 'Save this post.' or 'Follow @beteye — we track every team's tournament run.']\n\n"
+        "Example:\n"
+        "5 TEAMS THAT WILL DEFINE WC 2026:\n\n"
+        "1. France — Mbappé + Dembélé in peak form. Deepest attack in the tournament.\n"
+        "2. Brazil — Vinícius Jr. leads a squad with 8 Champions League finalists.\n"
+        "3. England — Bellingham anchors a midfield with genuine world-class depth.\n"
+        "4. Spain — Lamine Yamal, 17, starts. The youngest squad at the tournament.\n"
+        "5. Argentina — Defending champions. Messi's last World Cup. Built for this.\n\n"
+        "Follow @beteye — we cover every match as it happens.\n\n"
+        "Rules: 5-6 items. Each = name + one tight fact. Closing must relate to the list topic. Max 1800 chars."
     ),
     "reply": (
-        "TASK — REPLY: Add one concrete fact, stat, or piece of context that the original tweet missed. "
-        "State it as a fact, not a question. Be direct. Max 200 chars."
+        "TASK — REPLY\n"
+        "Add one fact or stat the original tweet missed. One sentence. Direct. No CTA. Max 180 chars."
     ),
 }
 
@@ -135,6 +227,7 @@ ANGLES = [
     "Read between the lines — what is the federation NOT saying?",
     "The dark horse benefit nobody's mentioned.",
 ]
+
 
 # ---------------------------------------------------------------------------
 # Persistence
@@ -159,8 +252,9 @@ def _item_key(item: dict) -> str:
 
 
 def _score_item(item: dict) -> int:
-    text = (item.get("title", "") + " " + item.get("summary", "")).lower()
-    return sum(w for kw, w in WC_KEYWORDS.items() if kw in text)
+    text  = (item.get("title", "") + " " + item.get("summary", "")).lower()
+    score = sum(w for kw, w in WC_KEYWORDS.items() if kw in text)
+    return score + item.get("source_bonus", 0)
 
 
 def _minutes_since_last_post() -> float:
@@ -188,33 +282,36 @@ def _load_intelligence() -> dict:
     return _load_json(INTEL_FILE, {})
 
 
-def _select_mode(is_breaking: bool, post_index: int) -> str:
+def _select_mode(item: dict, is_breaking: bool, post_index: int) -> str:
     """
-    Choose content mode weighted by learned performance.
-    Breaking items always start with 'news'.
+    Choose content mode. List/ranking articles always get 'list' mode.
+    Breaking news always gets 'news'. Otherwise use learned performance weights.
     """
     if is_breaking:
         return "news"
+
+    # Detect list/ranking articles — give them a richer long-form treatment
+    if _LIST_TITLE_RE.search(item.get("title", "")):
+        return "list"
 
     intel = _load_intelligence()
     mode_perf: dict = intel.get("mode_performance", {})
 
     if mode_perf:
-        # Weight by average engagement score — modes with higher scores get picked more often
         weights = [max(mode_perf.get(m, 1.0), 0.1) for m in POST_MODES]
         return random.choices(POST_MODES, weights=weights, k=1)[0]
 
-    # No intelligence yet — simple round-robin
     return POST_MODES[post_index % len(POST_MODES)]
 
 
 async def _generate_post(item: dict, mode: str = "news") -> str | None:
-    today      = datetime.now(timezone.utc).strftime("%B %d, %Y")
-    pub_approx = item.get("collected_at", "")[:10]
-    angle      = random.choice(ANGLES)
+    today       = datetime.now(timezone.utc).strftime("%B %d, %Y")
+    pub_approx  = item.get("collected_at", "")[:10]
+    angle       = random.choice(ANGLES)
     instruction = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["news"])
+    char_limit  = MODE_CHAR_LIMITS.get(mode, 280)
 
-    # Inject learned intelligence — green flags to amplify, red flags to avoid
+    # Inject learned intelligence
     intel       = _load_intelligence()
     green_flags = intel.get("green_flags", [])
     red_flags   = intel.get("red_flags", [])
@@ -235,7 +332,7 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
 
     source_text = (
         f"HEADLINE: {item['title']}\n"
-        f"SOURCE: {item.get('source', 'unknown')}\n"
+        f"SOURCE: {item.get('source', 'unknown')} (do NOT mention this outlet in the post)\n"
         f"DATE COLLECTED: ~{pub_approx}  |  TODAY: {today}\n\n"
         f"ARTICLE CONTENT:\n{item.get('summary', '(no body — use headline only)')}\n\n"
         f"---\n"
@@ -244,6 +341,7 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
         f"{learned_block}\n\n"
         f"HARD RULES:\n"
         f"- Only state facts from ARTICLE CONTENT. Do NOT add context from training data.\n"
+        f"- NEVER mention any media outlet, website, or publication name.\n"
         f"- Never say 'today', 'yesterday', 'this morning' unless ARTICLE CONTENT says so.\n"
         f"- Do not start with 'I'.\n"
         f"- BANNED: {BANNED_PHRASES}"
@@ -266,7 +364,11 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
         resp = await client.post("/generate/from-source", data=form_data)
         resp.raise_for_status()
         results = resp.json().get("results", [])
-        return results[0]["content"].strip() if results else None
+        if not results:
+            return None
+        text = results[0]["content"].strip()
+
+    return text[:char_limit]
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +389,6 @@ async def collect_job() -> None:
             "collector",
             trigger="interval",
             minutes=desired_mins,
-            misfire_grace_time=300,
         )
         _current_collect_interval = desired_mins
         log.info(f"[collect] Interval → {desired_mins}min ({'match-day' if is_match_day() else 'normal'})")
@@ -307,6 +408,7 @@ async def collect_job() -> None:
     added         = 0
     skipped_hist  = 0
     skipped_low   = 0
+    skipped_offtopic = 0
     has_breaking  = False
 
     for item in items:
@@ -317,6 +419,11 @@ async def collect_job() -> None:
         # Reject historical throwbacks
         if _HIST_YEAR_RE.search(item.get("title", "")):
             skipped_hist += 1
+            continue
+
+        # Hard gate — must have a World Cup 2026 signal, not just generic football
+        if not _has_wc_signal(item):
+            skipped_offtopic += 1
             continue
 
         score = _score_item(item)
@@ -348,7 +455,7 @@ async def collect_job() -> None:
 
     log.info(
         f"[collect] +{added} queued | "
-        f"skipped: {skipped_hist} historical, {skipped_low} low-relevance | "
+        f"skipped: {skipped_offtopic} off-topic, {skipped_hist} historical, {skipped_low} low-score | "
         f"breaking: {has_breaking} | queue: {len(queue)}"
     )
 
@@ -391,7 +498,7 @@ async def post_job() -> None:
         if posted >= POSTS_PER_RUN:
             break
 
-        mode = _select_mode(is_breaking=item.get("is_breaking", False), post_index=posted)
+        mode = _select_mode(item=item, is_breaking=item.get("is_breaking", False), post_index=posted)
 
         # Determine if this should be posted as a reply
         tweet_id_to_reply = None
@@ -419,19 +526,22 @@ async def post_job() -> None:
                 log.warning("[poster] Empty generation — skipping")
                 continue
 
-            text = text[:280]
-
             if DRY_RUN:
                 fake_id = f"dry_{int(datetime.now(timezone.utc).timestamp())}"
-                log.info(f"[poster] [DRY RUN] [{mode}]\n{text}\n{'─'*60}")
+                log.info(f"[poster] [DRY RUN] [{mode}] ({len(text)} chars)\n{text}\n{'─'*60}")
                 posted_id = fake_id
             else:
                 posted_id = post_tweet(text, reply_to_id=tweet_id_to_reply)
-                log.info(f"[poster] Posted {posted_id} [{mode}]: {text[:80]}…")
+                log.info(f"[poster] Posted {posted_id} [{mode}] ({len(text)} chars)\n{text}\n{'─'*60}")
 
             seen_set.add(item["key"])
             used_keys.append(item["key"])
             posted += 1
+
+            # Pace posts — don't blast all N at once; wait between each (skip after last)
+            if posted < POSTS_PER_RUN and POST_INTERVAL_SECS > 0:
+                log.info(f"[poster] Waiting {POST_INTERVAL_SECS}s before next post…")
+                await asyncio.sleep(POST_INTERVAL_SECS)
 
             # Track for performance review in 6h
             perf.append({

@@ -36,8 +36,8 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 8
+      start_period: 45s
 
   celery-worker:
     build: ./backend
@@ -151,6 +151,7 @@ services:
       - EXTRA_YOUTUBE_CHANNELS=${BETEYE_EXTRA_YOUTUBE_CHANNELS:-}
       - MAX_CONTENT_AGE_HOURS=${BETEYE_MAX_CONTENT_AGE_HOURS:-2}
       - TRANSCRIPT_MAX_CHARS=${BETEYE_TRANSCRIPT_MAX_CHARS:-2000}
+      - POST_INTERVAL_SECS=${BETEYE_POST_INTERVAL_SECS:-180}
     volumes:
       - ./beteye-agent:/app
       - beteye-data:/data
