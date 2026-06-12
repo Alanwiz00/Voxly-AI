@@ -152,6 +152,16 @@ _LIST_TITLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_CTA_MENU = """
+CTA TYPES — pick whichever fits the post best. NEVER use a question mark.
+  Follow:    "Follow @beteye for [specific thing related to this story]."
+  RT:        "RT this if you're watching live." / "Retweet to spread this."
+  Save:      "Bookmark this — [why it'll matter later]." / "Save this post."
+  Reply:     "Drop your [score / pick / take / prediction] below." / "Reply with your take."
+  Tag:       "Tag someone watching this game." / "Tag a [nationality] fan."
+  Statement: "[Bold one-liner that needs no action — e.g. 'This tournament is already delivering.']"
+"""
+
 MODE_INSTRUCTIONS = {
     "news": (
         "TASK — NEWS FLASH\n"
@@ -161,11 +171,12 @@ MODE_INSTRUCTIONS = {
         "- One blank line between each section\n"
         "- Section 1: the fact (1-2 lines)\n"
         "- Section 2: why it matters / what changes (1-2 lines)\n"
-        "- Section 3: CTA tied to this specific story (1 line)\n\n"
-        "EXAMPLE OUTPUT:\n"
+        "- Section 3: one CTA line — choose the type that best fits this story\n\n"
+        + _CTA_MENU +
+        "\nEXAMPLE OUTPUT:\n"
         "Germany's players are funding bus transport for 600 fans from New York to New Jersey.\n\n"
         "Train fares were hiked 300% for the tournament. The squad stepped in and covered the cost themselves.\n\n"
-        "Follow @beteye for everything happening off the pitch at WC 2026.\n\n"
+        "Tag a Germany fan who needs to see this.\n\n"
         "Max 900 chars."
     ),
     "stat": (
@@ -176,12 +187,13 @@ MODE_INSTRUCTIONS = {
         "- One blank line between each section\n"
         "- Section 1: the stat alone (1 line — short and punchy)\n"
         "- Section 2: context that makes the number hit harder (1-2 lines)\n"
-        "- Section 3: CTA tied to this stat (1 line)\n\n"
-        "EXAMPLE OUTPUT:\n"
+        "- Section 3: one CTA line — choose the type that best fits this stat\n\n"
+        + _CTA_MENU +
+        "\nEXAMPLE OUTPUT:\n"
         "80% of World Cup knockout goals came from set-piece patterns.\n\n"
         "Miss these signals, and you miss the game.\n"
         "Structural intelligence is the real edge.\n\n"
-        "Follow @beteye for the numbers that define WC 2026.\n\n"
+        "Bookmark this — set pieces will decide who goes home.\n\n"
         "Max 700 chars."
     ),
     "take": (
@@ -193,12 +205,13 @@ MODE_INSTRUCTIONS = {
         "- One blank line between each section\n"
         "- Section 1: the take — bold declarative statement (1-2 lines)\n"
         "- Section 2: the evidence that backs it up (1-2 lines)\n"
-        "- Section 3: CTA that invites a reply or action (1 line)\n\n"
-        "EXAMPLE OUTPUT:\n"
+        "- Section 3: one CTA line — choose the type that best drives engagement for this take\n\n"
+        + _CTA_MENU +
+        "\nEXAMPLE OUTPUT:\n"
         "The noise is everywhere.\n\n"
         "Group A is already decided on paper — the real battle is who finishes second.\n"
         "Three teams within 2 points on goal difference after matchday 1.\n\n"
-        "Drop your Group A prediction below.\n\n"
+        "Drop your Group A finalist below.\n\n"
         "Max 1800 chars."
     ),
     "list": (
@@ -210,15 +223,16 @@ MODE_INSTRUCTIONS = {
         "- One blank line\n"
         "- Numbered items, each on its own line: [Name or concept] — [specific fact]\n"
         "- One blank line after the list\n"
-        "- Closing: 1 strong statement or CTA related to the topic\n\n"
-        "EXAMPLE OUTPUT:\n"
+        "- Closing: one CTA line — choose the type that best fits this list\n\n"
+        + _CTA_MENU +
+        "\nEXAMPLE OUTPUT:\n"
         "5 TEAMS THAT WILL DEFINE WC 2026:\n\n"
         "1. France — Mbappé + Dembélé in peak form. Deepest attack in the tournament.\n"
         "2. Brazil — Vinícius Jr. leads a squad with 8 Champions League finalists.\n"
         "3. England — Bellingham anchors a midfield with genuine world-class depth.\n"
         "4. Spain — Lamine Yamal, 17, starts. The youngest squad at the tournament.\n"
         "5. Argentina — Defending champions. Messi's last World Cup. Built for this.\n\n"
-        "Follow @beteye — we cover every match as it happens.\n\n"
+        "RT this if your team made the list.\n\n"
         "Max 4000 chars."
     ),
     "reply": (
@@ -357,6 +371,7 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
         f"- Be specific — name a player, club, country, stadium, number, or event. Never be vague ('a key player', 'some teams', 'certain matches').\n"
         f"- Never say 'today', 'yesterday', 'this morning' unless ARTICLE CONTENT says so.\n"
         f"- Do not start with 'I'.\n"
+        f"- The post must NEVER end with a question mark. The CTA is always a statement or directive.\n"
         f"- BANNED PHRASES (never use these): {BANNED_PHRASES}"
     )
 
