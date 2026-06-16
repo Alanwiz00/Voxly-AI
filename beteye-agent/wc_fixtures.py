@@ -25,6 +25,10 @@ _STATIC_SCHEDULE = Path(__file__).parent / "wc_schedule.json"
 _CACHE_FILE = Path(os.environ.get("DATA_DIR", "/data")) / "wc_schedule_api.json"
 _CACHE_MAX_AGE_HOURS = float(os.environ.get("SCHEDULE_CACHE_HOURS", "12"))
 
+# Short-lived today cache — refreshed every 30min so kickoff times stay accurate
+_TODAY_CACHE_FILE     = Path(os.environ.get("DATA_DIR", "/data")) / "todays_fixtures.json"
+_TODAY_CACHE_MAX_MINS = 30
+
 # API Football
 _APISPORTS_KEY  = os.environ.get("APISPORTS_KEY", "")
 _APISPORTS_URL  = "https://v3.football.api-sports.io"
@@ -130,19 +134,20 @@ def _api_fixture_to_local(f: dict, group_map: dict[str, str]) -> dict | None:
         group     = group_map.get(home_name) or group_map.get(away_name) or "?"
 
         return {
-            "date":       et_dt.date().isoformat(),
-            "home":       home_name,
-            "away":       away_name,
-            "group":      group,
-            "matchday":   _parse_matchday(round_str),
-            "kickoff_et": et_dt.strftime("%H:%M"),
-            "venue":      fixture.get("venue", {}).get("name", "") or "",
-            "city":       fixture.get("venue", {}).get("city", "") or "",
-            "fixture_id": fixture.get("id"),
-            "status":     fixture.get("status", {}).get("short", "NS"),
-            "home_logo":  teams["home"].get("logo", "") or "",
-            "away_logo":  teams["away"].get("logo", "") or "",
-            "confirmed":  True,
+            "date":        et_dt.date().isoformat(),
+            "home":        home_name,
+            "away":        away_name,
+            "group":       group,
+            "matchday":    _parse_matchday(round_str),
+            "kickoff_utc": utc_dt.isoformat(),          # authoritative — used for all scheduling math
+            "kickoff_et":  et_dt.strftime("%H:%M"),     # display only
+            "venue":       fixture.get("venue", {}).get("name", "") or "",
+            "city":        fixture.get("venue", {}).get("city", "") or "",
+            "fixture_id":  fixture.get("id"),
+            "status":      fixture.get("status", {}).get("short", "NS"),
+            "home_logo":   teams["home"].get("logo", "") or "",
+            "away_logo":   teams["away"].get("logo", "") or "",
+            "confirmed":   True,
         }
     except Exception as e:
         log.debug(f"[fixtures] Could not parse fixture: {e}")
@@ -192,6 +197,75 @@ async def fetch_and_cache_schedule() -> bool:
         return False
 
 
+def _today_cache_is_fresh() -> bool:
+    if not _TODAY_CACHE_FILE.exists():
+        return False
+    age_mins = (datetime.now() - datetime.fromtimestamp(_TODAY_CACHE_FILE.stat().st_mtime)).total_seconds() / 60
+    return age_mins < _TODAY_CACHE_MAX_MINS
+
+
+async def fetch_todays_fixtures_live() -> list[dict]:
+    """
+    Fetch only today's WC 2026 fixtures from API Football (by date).
+    Stores result in the short-lived today cache. Returns empty list if no key or fetch fails.
+    This is called at startup and every 30min during the day so kickoff times are always accurate.
+    """
+    if not _APISPORTS_KEY:
+        log.debug("[fixtures] APISPORTS_KEY not set — skipping today's live fetch")
+        return []
+
+    from zoneinfo import ZoneInfo
+    _ET = ZoneInfo("America/New_York")
+    now_et   = datetime.now(_ET)
+    today_et = now_et.date()
+
+    # Always fetch today AND tomorrow in UTC terms.
+    # Late-evening ET games (e.g. 21:00 ET = 01:00 UTC next day) live on tomorrow's API date.
+    # The broadcast-day filter in get_todays_fixtures() decides what's actually "today".
+    fetch_dates = [
+        today_et.isoformat(),
+        (today_et + timedelta(days=1)).isoformat(),
+    ]
+
+    log.info(f"[fixtures] Fetching today's live fixtures for {fetch_dates} …")
+    raw_all: list[dict] = []
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for d in fetch_dates:
+                resp = await client.get(
+                    f"{_APISPORTS_URL}/fixtures",
+                    params={"league": _WC_LEAGUE_ID, "season": _WC_SEASON, "date": d},
+                    headers={"x-apisports-key": _APISPORTS_KEY},
+                )
+                resp.raise_for_status()
+                raw_all.extend(resp.json().get("response", []))
+    except Exception as e:
+        log.warning(f"[fixtures] Today's live fetch failed: {e}")
+        return []
+
+    # Build group map from full cache so we can annotate group letters
+    group_map: dict[str, str] = {}
+    for m in _load_schedule():
+        if m.get("group", "?") != "?":
+            group_map[m["home"]] = m["group"]
+            group_map[m["away"]] = m["group"]
+
+    fixtures = [r for f in raw_all if (r := _api_fixture_to_local(f, group_map)) is not None]
+    fixtures.sort(key=lambda m: m.get("kickoff_utc", m.get("kickoff_et", "")))
+
+    if fixtures:
+        try:
+            _TODAY_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _TODAY_CACHE_FILE.write_text(json.dumps(fixtures, ensure_ascii=False, indent=2))
+            log.info(f"[fixtures] Today cache updated — {len(fixtures)} fixtures (UTC times from API)")
+        except Exception as e:
+            log.warning(f"[fixtures] Could not write today cache: {e}")
+    else:
+        log.warning("[fixtures] API returned 0 fixtures for today")
+
+    return fixtures
+
+
 async def ensure_schedule_fresh() -> None:
     """Call at agent startup and once daily to keep the cache current."""
     if _cache_is_fresh():
@@ -207,10 +281,17 @@ async def ensure_schedule_fresh() -> None:
 # ---------------------------------------------------------------------------
 
 def _load_schedule() -> list[dict]:
-    """Load live cache if fresh, else bundled static file."""
+    """Load live cache if available, else bundled static file."""
     if _CACHE_FILE.exists():
         return _load_cache()
     return _load_static()
+
+
+def _load_today_cache() -> list[dict]:
+    try:
+        return json.loads(_TODAY_CACHE_FILE.read_text())
+    except Exception:
+        return []
 
 
 def _broadcast_day_bounds(now: datetime) -> tuple[datetime, datetime]:
@@ -227,27 +308,45 @@ def _broadcast_day_bounds(now: datetime) -> tuple[datetime, datetime]:
     return day_start, day_end
 
 
+def _parse_ko(m: dict) -> datetime:
+    """Return timezone-aware kickoff datetime. Prefers kickoff_utc, falls back to kickoff_et."""
+    utc_str = m.get("kickoff_utc", "")
+    if utc_str:
+        try:
+            return datetime.fromisoformat(utc_str).astimezone(ET)
+        except ValueError:
+            pass
+    date_str = m.get("date", "")
+    time_str = m.get("kickoff_et", "00:00")
+    return datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=ET)
+
+
 def get_todays_fixtures() -> list[dict]:
     """
     Return matches in the current broadcast day (06:00 ET → 05:59 ET next day),
-    sorted by actual kickoff time. This means a game kicking off at 00:00 ET on
-    June 17 is treated as part of June 16's broadcast day, not June 17's.
+    sorted by actual kickoff time.
+
+    Source priority:
+      1. /data/todays_fixtures.json  — live from API Football, refreshed every 30min
+      2. /data/wc_schedule_api.json  — full season cache (12h TTL)
+      3. wc_schedule.json (bundled)  — static fallback
     """
     now = datetime.now(ET)
     day_start, day_end = _broadcast_day_bounds(now)
+
+    # Prefer short-lived today cache (has accurate UTC kickoff times)
+    source = _load_today_cache() if _TODAY_CACHE_FILE.exists() else _load_schedule()
+
     result = []
-    for m in _load_schedule():
-        date_str = m.get("date", "")
-        time_str = m.get("kickoff_et", "00:00")
+    for m in source:
         try:
-            ko = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=ET)
-        except ValueError:
+            ko = _parse_ko(m)
+        except (ValueError, KeyError):
             continue
         if day_start <= ko < day_end:
             result.append(m)
-    return sorted(result, key=lambda m: datetime.strptime(
-        f"{m['date']} {m.get('kickoff_et','00:00')}", "%Y-%m-%d %H:%M"
-    ).replace(tzinfo=ET))
+
+    return sorted(result, key=_parse_ko)
 
 
 def get_upcoming_fixtures(days: int = 2) -> list[dict]:

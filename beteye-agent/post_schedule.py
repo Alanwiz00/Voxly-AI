@@ -46,7 +46,16 @@ class PostSlot:
 
 
 def _kickoff_et(fixture: dict) -> datetime:
-    """Parse kickoff as ET-aware datetime."""
+    """
+    Return timezone-aware kickoff datetime in ET.
+    Prefers kickoff_utc (from API Football) for accuracy; falls back to kickoff_et string.
+    """
+    utc_str = fixture.get("kickoff_utc", "")
+    if utc_str:
+        try:
+            return datetime.fromisoformat(utc_str).astimezone(ET)
+        except (ValueError, TypeError):
+            pass
     date_str = fixture["date"]
     time_str = fixture.get("kickoff_et", "12:00")
     dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")

@@ -28,7 +28,9 @@ import tweepy
 from poster import post_tweet, get_tweet_metrics, upload_media, validate_credentials
 from image_gen import generate_post_image
 from matchday import get_match_config, is_match_day
-from wc_fixtures import get_fixture_context_block, fixture_count_today, ensure_schedule_fresh, get_todays_fixtures
+from wc_fixtures import (get_fixture_context_block, fixture_count_today,
+                         ensure_schedule_fresh, get_todays_fixtures,
+                         fetch_todays_fixtures_live)
 from post_schedule import PostSlot, build_daily_schedule, describe_schedule, MODE_DAILY_CAPS
 
 ET = ZoneInfo("America/New_York")
@@ -204,61 +206,69 @@ MODE_INSTRUCTIONS = {
     ),
 
     "take": (
-        "TASK — SHARP TAKE / NARRATIVE\n"
-        "Write about the FEATURED FIXTURE in the context block — that specific match only.\n\n"
-        "POST-MATCH NARRATIVE PATTERN:\n"
-        "  1. Open with calm authority: 'No shock. No noise. @beteye_ already knew what was coming.'\n"
-        "  2. Tell the story — 2–3 sentences, each on its own line. NO blank lines.\n"
-        "  3. Historical depth: a fact that makes the moment feel bigger ('42 years of waiting')\n"
-        "  4. Pivot to intelligence: 'See, this is the thing about data intelligence — it doesn't do guessing.'\n"
-        "     Pattern: 'It sees the pressure. It feels the weight. It finds the patterns.'\n"
-        "  5. Brand stamp: 'While people were reacting, BetEye members were already three steps ahead.'\n"
-        "  6. Closing directive or bold statement — never a question.\n\n"
+        "TASK — POST-MATCH SHARP TAKE\n"
+        "Write a reaction post about the FEATURED FIXTURE — that match only.\n\n"
+        "⚠ FORMAT — NON-NEGOTIABLE: Every sentence on its own line. No prose paragraphs.\n\n"
+        "STRUCTURE:\n"
+        "  Line 1: Open — calm, knowing. Something that feels like you saw it coming.\n"
+        "           Don't recycle 'No shock. No noise.' — be specific to what actually happened.\n"
+        "           e.g. 'Messi with the assist. Of course. Game 1 of his last World Cup.'\n"
+        "               'Algeria held for 60 minutes. Then the wall came down.'\n"
+        "  Line 2–4: Tell the story — 2-3 lines. What happened, what it means, the key moment.\n"
+        "  Line 5: Historical parallel — a number, a record, a year that makes this bigger.\n"
+        "  Line 6: BetEye organic pivot — NOT a template. Specific to this game.\n"
+        "           Show how the data/intelligence angle applies to what just happened.\n"
+        "           Examples:\n"
+        "             'The xG on Algeria's 63rd minute chance had this written all over it. @BetEye_ 👁'\n"
+        "             'Messi's pressing stats in openers. That pattern was always there. @BetEye_ 👁'\n"
+        "             'People were shocked. BetEye members weren't watching in surprise — they were watching for confirmation. @BetEye_ 👁'\n"
+        "  Line 7: Close — one bold statement or directive. No question mark.\n\n"
         "RULES:\n"
-        "  Each sentence on its own line. NO blank lines between sentences.\n"
-        "  Specific: player names, records, years, goals, stadiums.\n"
-        "  Never say 'according to' or name any outlet.\n"
-        "  At most ONE question mark total.\n\n"
-        + _CLOSING_LINE_GUIDE +
-        "\n\nEXAMPLE OUTPUT (post-match):\n"
-        "No shock. No noise. Just a calm nod because @beteye_ already knew what was coming.\n\n"
-        "He had 99 European goals. You think that man was sleeping?\n"
-        "He made it 100. Right on schedule.\n\n"
-        "42 years of pain sitting in that stadium like unpaid debt.\n"
-        "Tonight it finally cleared.\n\n"
-        "See, this is the thing about data intelligence. It doesn't do guessing.\n"
-        "It sees the pressure a player is carrying.\n"
-        "It finds the patterns everyone else walks past.\n\n"
-        "While people were reacting, BetEye members were already three steps ahead.\n\n"
-        "That composure you're seeing? It comes from information and data leverage.\n\n"
-        "Max 2000 chars."
+        "- FEATURED FIXTURE only. Real names, real numbers, real moments.\n"
+        "- Never name outlets. Never say 'according to'.\n"
+        "- At most ONE question mark total.\n"
+        "- Max 800 chars.\n\n"
+        "EXAMPLE (France vs Senegal, France wins 1-0, Mbappé goal 74'):\n"
+        "Mbappé, 74 minutes. Right when Senegal started believing.\n"
+        "The opener is always about nerves. France absorbed them until they didn't need to.\n"
+        "Mendy made three big stops before that. The wall finally cracked at the wrong time.\n"
+        "France have now won 9 of their last 10 WC group stage games.\n"
+        "The data had France winning this one. The pattern was clear from the lineup. @BetEye_ 👁\n"
+        "Next fixture matters more.\n\n"
+        "Max 800 chars."
     ),
 
     "matchday": (
         "TASK — PRE-MATCH HYPE (ONE GAME ONLY)\n"
         "Write about EXACTLY the fixture in HEADLINE. One match. Nothing else.\n\n"
-        "STRUCTURE: Each sentence on its own line. NO blank lines anywhere.\n"
-        "  [Hook — a stat, record, or storyline that makes THIS game unmissable. 1–2 sentences.]\n"
-        "  [Kickoff bare facts — TIME ET · STADIUM/CITY · Group X.]\n"
-        "  [The key tension — one player, one number, one reason to watch.]\n"
-        "  Every edge you ever missed in any game was visible to someone.\n"
-        "  That someone is @BetEye. 👁\n"
-        "  [Close — 1 directive line. No question mark.]\n\n"
+        "⚠ FORMAT — THIS IS NON-NEGOTIABLE:\n"
+        "Output MUST be structured as individual lines separated by newline characters.\n"
+        "Every sentence lives on its own line. Do NOT write prose paragraphs.\n"
+        "Structure (7 lines max):\n"
+        "  Line 1: Hook — sharp fact, record, or rivalry specific to THIS match\n"
+        "  Line 2: (optional) second hook line if it adds weight\n"
+        "  Line 3: Bare facts — [TIME] ET · [STADIUM] · [CITY] · Group [X]\n"
+        "  Line 4: The duel — one player vs one player, or one number that defines this\n"
+        "  Line 5: BetEye organic angle — NOT the stock phrase. Write something specific to THIS game.\n"
+        "           Tie it to the narrative. End with @BetEye_ 👁 naturally.\n"
+        "           Examples of organic angles:\n"
+        "             'The data on Messi in tournament openers tells a specific story. @BetEye_ 👁'\n"
+        "             'Algeria have beaten heavier favourites before. @BetEye_ already mapped the risk.👁'\n"
+        "             'Whoever wins the midfield battle wins this. @BetEye_ sees exactly where it breaks.👁'\n"
+        "  Line 6: Closing directive — short, punchy. No question mark.\n\n"
         "RULES:\n"
-        "- This match ONLY. Do not mention any other game.\n"
-        "- NO blank lines between sentences — tight, punchy, no gaps.\n"
-        "- Use kickoff time and venue from FEATURED FIXTURE.\n"
-        "- Specific: name players, cite a real number, name the stadium.\n"
-        "- Max ONE question mark in the entire post.\n"
+        "- ONE match only. Never reference another game.\n"
+        "- Use time and venue from FEATURED FIXTURE.\n"
+        "- Real names, real numbers, real history. Nothing invented.\n"
+        "- Max ONE question mark total.\n"
         "- Max 400 chars total.\n\n"
-        "EXAMPLE OUTPUT:\n"
-        "France haven't lost a World Cup group stage game in 12 years.\n"
-        "Senegal ended that streak once before. 2002. Remember.\n"
-        "3PM ET · MetLife Stadium · Group I.\n"
-        "Mbappé vs Édouard Mendy. The one duel that decides this.\n"
-        "Every edge you ever missed in any game was visible to someone.\n"
-        "That someone is @BetEye. 👁\n"
-        "Set your alarm.\n\n"
+        "EXAMPLE OUTPUT (each line is a real Twitter line break):\n"
+        "France haven't lost a WC group stage game in 12 years.\n"
+        "Senegal ended that streak once. 2002. They remember.\n"
+        "3PM ET · MetLife Stadium · East Rutherford · Group I.\n"
+        "Mbappé vs Mendy. Two men who know each other too well.\n"
+        "Sadio played in this era. The data knows who carries the weight. @BetEye_ 👁\n"
+        "Don't sleep on this one.\n\n"
         "Max 400 chars."
     ),
 
@@ -564,6 +574,13 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
         if not results:
             return None
         text = results[0]["content"].strip()
+
+    # For line-structured modes: if the API collapsed newlines into a single block,
+    # reinsert line breaks after sentence-ending punctuation.
+    if mode in ("matchday", "take", "stat") and "\n" not in text:
+        import re
+        # Insert \n after ". ", "! ", "? " when followed by a capital letter or emoji
+        text = re.sub(r'([.!?])\s+(?=[A-Z\U0001F300-\U0001FAFF])', r'\1\n', text)
 
     return text[:char_limit]
 
@@ -1149,15 +1166,29 @@ async def main() -> None:
 
     # Fetch live WC schedule from API Football (falls back to bundled static file if no key)
     await ensure_schedule_fresh()
+    # Fetch today's fixtures with UTC kickoff times — this is the authoritative source for scheduling
+    await fetch_todays_fixtures_live()
 
     scheduler = AsyncIOScheduler(timezone="UTC")
 
-    # Refresh WC fixture cache every 12h
+    # Refresh full WC schedule every 12h
     scheduler.add_job(
         ensure_schedule_fresh,
         trigger="interval",
         hours=12,
         id="schedule_refresh",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # Refresh today's fixtures every 30min — keeps UTC kickoff times accurate
+    # and picks up any late kickoff adjustments from API Football
+    scheduler.add_job(
+        fetch_todays_fixtures_live,
+        trigger="interval",
+        minutes=30,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=30),
+        id="todays_fixtures_refresh",
         max_instances=1,
         coalesce=True,
     )
