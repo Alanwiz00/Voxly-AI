@@ -19,10 +19,10 @@
   {"date":"2026-06-15","home":"Spain","away":"Cabo Verde","group":"H","matchday":1,"kickoff_et":"21:00","venue":"Hard Rock Stadium","city":"Miami","confirmed":false},
 
   {"date":"2026-06-16","home":"Saudi Arabia","away":"Uruguay","group":"H","matchday":1,"kickoff_et":"12:00","venue":"","city":"","confirmed":false},
-  {"date":"2026-06-16","home":"Iraq","away":"Norway","group":"I","matchday":1,"kickoff_et":"12:00","venue":"","city":"","confirmed":false},
-  {"date":"2026-06-16","home":"France","away":"Senegal","group":"I","matchday":1,"kickoff_et":"15:00","venue":"Arrowhead Stadium","city":"Kansas City","confirmed":true},
-  {"date":"2026-06-16","home":"Jordan","away":"Austria","group":"J","matchday":1,"kickoff_et":"18:00","venue":"","city":"","confirmed":false},
-  {"date":"2026-06-16","home":"Argentina","away":"Algeria","group":"J","matchday":1,"kickoff_et":"21:00","venue":"NRG Stadium","city":"Houston","confirmed":true},
+  {"date":"2026-06-16","home":"France","away":"Senegal","group":"I","matchday":1,"kickoff_et":"15:00","venue":"MetLife Stadium","city":"East Rutherford NJ","confirmed":true},
+  {"date":"2026-06-16","home":"Iraq","away":"Norway","group":"I","matchday":1,"kickoff_et":"18:00","venue":"Gillette Stadium","city":"Foxborough MA","confirmed":true},
+  {"date":"2026-06-16","home":"Argentina","away":"Algeria","group":"J","matchday":1,"kickoff_et":"21:00","venue":"Arrowhead Stadium","city":"Kansas City","confirmed":true},
+  {"date":"2026-06-17","home":"Jordan","away":"Austria","group":"J","matchday":1,"kickoff_et":"00:00","venue":"","city":"","confirmed":true},
 
   {"date":"2026-06-17","home":"Portugal","away":"Colombia","group":"K","matchday":1,"kickoff_et":"12:00","venue":"Rose Bowl","city":"Pasadena CA","confirmed":false},
   {"date":"2026-06-17","home":"DR Congo","away":"Uzbekistan","group":"K","matchday":1,"kickoff_et":"15:00","venue":"","city":"","confirmed":false},

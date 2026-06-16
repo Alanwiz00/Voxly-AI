@@ -8,6 +8,25 @@ log = logging.getLogger("beteye.poster")
 _client: tweepy.Client | None = None
 _v1_api: tweepy.API | None = None
 
+_REQUIRED_CREDS = ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET")
+
+
+def validate_credentials() -> bool:
+    """
+    Check all four X credentials are present and non-empty.
+    Call at startup — posts will 403 silently otherwise.
+    """
+    missing = [k for k in _REQUIRED_CREDS if not os.environ.get(k)]
+    if missing:
+        log.error(
+            f"[poster] Missing X credentials: {missing}. "
+            "Posting will fail. Set these in .env and ensure the Twitter app has "
+            "Read+Write permissions, then regenerate Access Token + Secret."
+        )
+        return False
+    log.info("[poster] X credentials present — OAuth 1.0a ready")
+    return True
+
 
 def _get_client() -> tweepy.Client:
     global _client
@@ -38,13 +57,18 @@ def _get_v1_api() -> tweepy.API:
 def upload_media(image_path: str) -> str | None:
     """
     Upload an image to X/Twitter and return the media_id string.
-    Uses v1.1 API (chunked upload for images up to 5MB).
-    Returns None on failure — post will go out without image.
+    Uses v1.1 API (chunked upload). Returns None on failure — post goes out without image.
     """
     try:
         media = _get_v1_api().media_upload(filename=image_path)
         log.info(f"[poster] Media uploaded: {media.media_id}")
         return str(media.media_id)
+    except tweepy.errors.Forbidden:
+        log.warning(
+            "[poster] Media upload 403 — Twitter app needs Read+Write permissions. "
+            "Update permissions in Developer Portal then regenerate Access Token + Secret."
+        )
+        return None
     except Exception as e:
         log.warning(f"[poster] Media upload failed: {e}")
         return None
@@ -56,7 +80,8 @@ def post_tweet(text: str, reply_to_id: str | None = None, media_id: str | None =
     if reply_to_id:
         kwargs["reply"] = {"in_reply_to_tweet_id": reply_to_id}
     if media_id:
-        kwargs["media"] = {"media_ids": [media_id]}
+        # Tweepy v4: media_ids is a direct list param — NOT media={"media_ids": [...]}
+        kwargs["media_ids"] = [media_id]
     response = _get_client().create_tweet(**kwargs)
     return str(response.data["id"])
 

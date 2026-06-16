@@ -24,7 +24,8 @@ from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
 from sources import get_all_items
-from poster import post_tweet, get_tweet_metrics, upload_media
+import tweepy
+from poster import post_tweet, get_tweet_metrics, upload_media, validate_credentials
 from image_gen import generate_post_image
 from matchday import get_match_config, is_match_day
 from wc_fixtures import get_fixture_context_block, fixture_count_today, ensure_schedule_fresh, get_todays_fixtures
@@ -419,6 +420,22 @@ def _increment_mode_count(mode: str) -> None:
     _save_json(STATE_FILE, state)
 
 
+def _get_posted_slots() -> set[str]:
+    """Return the set of slot keys already posted (survives restarts)."""
+    state = _load_json(STATE_FILE, {})
+    return set(state.get("posted_slots", []))
+
+
+def _mark_slot_posted(slot_key: str) -> None:
+    """Persist a slot key so it is skipped on restart. Keys are date-stamped; keep last 200."""
+    state = _load_json(STATE_FILE, {})
+    slots: list[str] = state.get("posted_slots", [])
+    if slot_key not in slots:
+        slots.append(slot_key)
+    state["posted_slots"] = slots[-200:]
+    _save_json(STATE_FILE, state)
+
+
 def _fixture_to_item(fixture: dict, mode: str) -> dict:
     """Synthesise a queue item from fixture data for scheduled matchday/stat posts."""
     home    = fixture["home"]
@@ -754,7 +771,16 @@ async def post_job() -> None:
                 )
                 posted_id = fake_id
             else:
-                posted_id = post_tweet(text, reply_to_id=tweet_id_to_reply, media_id=media_id)
+                try:
+                    posted_id = post_tweet(text, reply_to_id=tweet_id_to_reply, media_id=media_id)
+                except tweepy.errors.Forbidden:
+                    log.error(
+                        "[poster] 403 Forbidden from Twitter — app needs Read+Write permissions. "
+                        "Update in Developer Portal then regenerate Access Token + Secret."
+                    )
+                    if image_path:
+                        image_path.unlink(missing_ok=True)
+                    break  # auth is broken for this run — stop trying
                 log.info(
                     f"[poster] Posted {posted_id} [{mode}] ({len(text)} chars)"
                     f"{' +image' if media_id else ''}\n{text}\n{'─'*60}"
@@ -813,7 +839,7 @@ async def post_job() -> None:
 # Job 3 — Scheduled post (fires at pre-calculated fixture-aware times)
 # ---------------------------------------------------------------------------
 
-async def scheduled_post_job(mode: str, fixture: dict | None, label: str) -> None:
+async def scheduled_post_job(mode: str, fixture: dict | None, label: str, slot_key: str = "") -> None:
     """Execute a single scheduled post slot with full mode + daily cap enforcement."""
     log.info(f"[schedule] Slot fired: {label}")
 
@@ -871,7 +897,17 @@ async def scheduled_post_job(mode: str, fixture: dict | None, label: str) -> Non
             f"{text}\n{'─'*60}"
         )
     else:
-        posted_id = post_tweet(text, media_id=media_id)
+        try:
+            posted_id = post_tweet(text, media_id=media_id)
+        except tweepy.errors.Forbidden:
+            log.error(
+                "[schedule] 403 Forbidden from Twitter — app needs Read+Write permissions. "
+                "Go to Developer Portal → App → User auth settings → set Permissions to 'Read and Write', "
+                "then regenerate Access Token + Secret and update .env."
+            )
+            if image_path:
+                image_path.unlink(missing_ok=True)
+            return
         log.info(
             f"[schedule] Posted {posted_id} [{mode}]{' +image' if media_id else ''}\n"
             f"{text}\n{'─'*60}"
@@ -895,6 +931,10 @@ async def scheduled_post_job(mode: str, fixture: dict | None, label: str) -> Non
         seen_set.add(item["key"])
         _save_json(SEEN_FILE, list(seen_set)[-5000:])
 
+    # Mark this slot as done — prevents duplicate on restart
+    if slot_key:
+        _mark_slot_posted(slot_key)
+
     # Track for performance review
     perf: list = _load_json(PERF_FILE, [])
     perf.append({
@@ -915,7 +955,7 @@ async def scheduled_post_job(mode: str, fixture: dict | None, label: str) -> Non
 async def schedule_today() -> None:
     """
     Build today's fixture-aware post schedule and register APScheduler date jobs.
-    Safe to call multiple times — clears previous slot jobs first.
+    Already-posted slots are skipped. Safe to call on restart or at midnight.
     """
     # Clear any existing slot jobs from a previous schedule build
     for job in scheduler.get_jobs():
@@ -927,16 +967,29 @@ async def schedule_today() -> None:
         log.info("[schedule] No fixtures today — no scheduled slots added")
         return
 
+    posted_slots = _get_posted_slots()
     slots = build_daily_schedule(fixtures)
-    log.info(f"[schedule] Today's post schedule ({len(slots)} slots):\n{describe_schedule(slots)}")
 
-    for i, slot in enumerate(slots):
+    skipped = [s for s in slots if s.slot_key in posted_slots]
+    pending = [s for s in slots if s.slot_key not in posted_slots]
+
+    if skipped:
+        log.info(f"[schedule] Skipping {len(skipped)} already-posted slot(s): {[s.slot_key for s in skipped]}")
+
+    log.info(f"[schedule] Today's pending slots ({len(pending)}):\n{describe_schedule(pending)}")
+
+    for i, slot in enumerate(pending):
         job_id = f"slot_{slot.mode}_{i}"
         scheduler.add_job(
             scheduled_post_job,
             trigger="date",
             run_date=slot.run_at,
-            kwargs={"mode": slot.mode, "fixture": slot.fixture, "label": slot.label},
+            kwargs={
+                "mode":     slot.mode,
+                "fixture":  slot.fixture,
+                "label":    slot.label,
+                "slot_key": slot.slot_key,
+            },
             id=job_id,
             replace_existing=True,
             misfire_grace_time=300,
@@ -1089,6 +1142,9 @@ async def main() -> None:
     if not PERSONA_ID:
         log.warning("PERSONA_ID not set — run setup.py first")
 
+    # Validate X (Twitter) credentials before anything else
+    validate_credentials()
+
     # Fetch live WC schedule from API Football (falls back to bundled static file if no key)
     await ensure_schedule_fresh()
 
@@ -1116,10 +1172,13 @@ async def main() -> None:
         misfire_grace_time=300,
     )
 
-    # Rebuild daily post schedule every midnight ET (picks up next day's fixtures)
+    # Rebuild schedule at 06:00 ET — this is when the broadcast day rolls over.
+    # The broadcast day is 06:00 ET → 05:59 ET the next day, so at 06:00 we pick up
+    # the new day's fixtures (Portugal, England, etc.) without interfering with late-night
+    # games that cross midnight ET (e.g. 00:00 ET kickoffs from the previous schedule build).
     scheduler.add_job(
         schedule_today,
-        trigger=CronTrigger(hour=0, minute=2, timezone=ET),
+        trigger=CronTrigger(hour=6, minute=0, timezone=ET),
         id="schedule_rebuild",
         max_instances=1,
         coalesce=True,

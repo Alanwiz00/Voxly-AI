@@ -42,6 +42,7 @@ class PostSlot:
     mode: str
     fixture: dict | None     # specific fixture (None for take/news)
     label: str
+    slot_key: str = ""       # stable dedup key — survives restarts
 
 
 def _kickoff_et(fixture: dict) -> datetime:
@@ -53,9 +54,12 @@ def _kickoff_et(fixture: dict) -> datetime:
 
 
 def is_marquee(fixture: dict) -> bool:
-    return bool(
-        MARQUEE_TEAMS & {fixture.get("home", ""), fixture.get("away", "")}
-    )
+    return bool(MARQUEE_TEAMS & {fixture.get("home", ""), fixture.get("away", "")})
+
+
+def _hype_score(fixture: dict) -> int:
+    """Count of marquee teams in a fixture — used to pick the best stat slot."""
+    return sum(1 for t in (fixture.get("home", ""), fixture.get("away", "")) if t in MARQUEE_TEAMS)
 
 
 def build_daily_schedule(
@@ -70,66 +74,70 @@ def build_daily_schedule(
     if now is None:
         now = datetime.now(ET)
 
+    today_str = now.date().isoformat()
     slots: list[PostSlot] = []
     stat_count = 0
 
-    by_kickoff = sorted(fixtures, key=lambda f: f.get("kickoff_et", "00:00"))
+    # Sort by actual ET datetime, not time string ("00:00" < "15:00" alphabetically but
+    # a midnight game on June 17 kicks off AFTER a 21:00 game on June 16).
+    by_kickoff = sorted(fixtures, key=_kickoff_et)
 
     # ── 1. Matchday posts — 5h before each kickoff ─────────────────────────
     for fx in by_kickoff:
-        kickoff = _kickoff_et(fx)
-        run_at  = kickoff - timedelta(hours=5)
-        label   = f"matchday: {fx['home']} vs {fx['away']}"
+        kickoff  = _kickoff_et(fx)
+        run_at   = kickoff - timedelta(hours=5)
+        label    = f"matchday: {fx['home']} vs {fx['away']}"
+        slot_key = f"matchday_{fx.get('date', today_str)}_{fx['home']}_{fx['away']}"
 
         if run_at < now:
             if now < kickoff:
                 # Missed window but game hasn't kicked off — post ASAP
                 run_at = now + timedelta(minutes=5)
             else:
-                continue  # game already started/ended — skip
+                continue  # game already started/ended — skip entirely
 
-        slots.append(PostSlot(run_at=run_at, mode="matchday", fixture=fx, label=label))
+        slots.append(PostSlot(run_at=run_at, mode="matchday", fixture=fx, label=label, slot_key=slot_key))
 
-    # ── 2. Stat posts — 90min before kickoff, marquee only, max 1/day ──────
-    for fx in by_kickoff:
-        if not is_marquee(fx):
-            continue
-        kickoff = _kickoff_et(fx)
-        run_at  = kickoff - timedelta(minutes=90)
-        label   = f"stat: {fx['home']} vs {fx['away']}"
+    # ── 2. Stat post — 90min before kickoff, single most-hyped marquee game ─
+    # Sort marquee fixtures by hype (both teams marquee > one team) then by kickoff.
+    marquee_by_hype = sorted(
+        [fx for fx in by_kickoff if is_marquee(fx)],
+        key=lambda f: (-_hype_score(f), _kickoff_et(f)),
+    )
+    for fx in marquee_by_hype:
+        kickoff  = _kickoff_et(fx)
+        run_at   = kickoff - timedelta(minutes=90)
+        label    = f"stat: {fx['home']} vs {fx['away']}"
+        slot_key = f"stat_{fx.get('date', today_str)}_{fx['home']}_{fx['away']}"
 
         if run_at < now:
-            continue  # missed — no ASAP for stat (loses context)
+            continue  # missed — no ASAP; stat loses context after kickoff
 
-        slots.append(PostSlot(run_at=run_at, mode="stat", fixture=fx, label=label))
+        slots.append(PostSlot(run_at=run_at, mode="stat", fixture=fx, label=label, slot_key=slot_key))
         stat_count += 1
         if stat_count >= MODE_DAILY_CAPS["stat"]:
             break
 
     # ── 3. Take posts — post-match buzz windows, max 2/day ─────────────────
-    # One take after the first match finishes, one after the last.
-    # Single-fixture day: halftime (KO+60) + full-time (KO+110).
-    take_times: list[tuple[datetime, dict | None]] = []
+    take_times: list[datetime] = []
 
     if len(by_kickoff) == 1:
         ko = _kickoff_et(by_kickoff[0])
-        take_times = [(ko + timedelta(minutes=60), None), (ko + timedelta(minutes=110), None)]
+        take_times = [ko + timedelta(minutes=60), ko + timedelta(minutes=110)]
     elif len(by_kickoff) >= 2:
         first_ko = _kickoff_et(by_kickoff[0])
         last_ko  = _kickoff_et(by_kickoff[-1])
-        take_times = [
-            (first_ko + timedelta(minutes=110), None),
-            (last_ko  + timedelta(minutes=110), None),
-        ]
+        take_times = [first_ko + timedelta(minutes=110), last_ko + timedelta(minutes=110)]
 
-    for take_at, fx in take_times:
+    for take_idx, take_at in enumerate(take_times):
         if take_at <= now:
             continue
         slots.append(PostSlot(
             run_at=take_at,
             mode="take",
-            fixture=fx,
+            fixture=None,
             label="take: post-match reaction",
+            slot_key=f"take_{today_str}_{take_idx}",
         ))
 
     # ── 4. News post — 09:30 ET fixed slot ─────────────────────────────────
@@ -137,7 +145,13 @@ def build_daily_schedule(
     if news_at <= now:
         news_at = now + timedelta(minutes=10)  # ASAP if we're past 09:30
 
-    slots.append(PostSlot(run_at=news_at, mode="news", fixture=None, label="news: morning briefing"))
+    slots.append(PostSlot(
+        run_at=news_at,
+        mode="news",
+        fixture=None,
+        label="news: morning briefing",
+        slot_key=f"news_{today_str}",
+    ))
 
     slots.sort(key=lambda s: s.run_at)
     return slots

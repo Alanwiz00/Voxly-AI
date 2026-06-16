@@ -213,11 +213,41 @@ def _load_schedule() -> list[dict]:
     return _load_static()
 
 
+def _broadcast_day_bounds(now: datetime) -> tuple[datetime, datetime]:
+    """
+    Return (start, end) of the current 'broadcast day'.
+    A broadcast day runs 06:00 ET → 05:59 ET the following day, so that
+    games kicking off after midnight ET (e.g. 01:00 ET) belong to the
+    previous evening's schedule.
+    """
+    day_start = now.replace(hour=6, minute=0, second=0, microsecond=0)
+    if now < day_start:
+        day_start -= timedelta(days=1)
+    day_end = day_start + timedelta(hours=24)
+    return day_start, day_end
+
+
 def get_todays_fixtures() -> list[dict]:
-    """Return matches kicking off today (ET), sorted by kickoff."""
-    today_str = datetime.now(ET).date().isoformat()
-    matches = [m for m in _load_schedule() if m.get("date") == today_str]
-    return sorted(matches, key=lambda m: m.get("kickoff_et", "00:00"))
+    """
+    Return matches in the current broadcast day (06:00 ET → 05:59 ET next day),
+    sorted by actual kickoff time. This means a game kicking off at 00:00 ET on
+    June 17 is treated as part of June 16's broadcast day, not June 17's.
+    """
+    now = datetime.now(ET)
+    day_start, day_end = _broadcast_day_bounds(now)
+    result = []
+    for m in _load_schedule():
+        date_str = m.get("date", "")
+        time_str = m.get("kickoff_et", "00:00")
+        try:
+            ko = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=ET)
+        except ValueError:
+            continue
+        if day_start <= ko < day_end:
+            result.append(m)
+    return sorted(result, key=lambda m: datetime.strptime(
+        f"{m['date']} {m.get('kickoff_et','00:00')}", "%Y-%m-%d %H:%M"
+    ).replace(tzinfo=ET))
 
 
 def get_upcoming_fixtures(days: int = 2) -> list[dict]:
