@@ -50,14 +50,12 @@ PERSONA_ID            = os.environ.get("PERSONA_ID")
 POSTS_PER_RUN         = int(os.environ.get("POSTS_PER_RUN", "1"))
 DAILY_POST_MAX        = int(os.environ.get("DAILY_POST_MAX", "15"))
 COLLECT_INTERVAL_MINS = float(os.environ.get("COLLECT_INTERVAL_MINS", "30"))
-STARTUP_GRACE_MINS    = float(os.environ.get("STARTUP_GRACE_MINS", "30"))  # crawl-only window after start
-QUEUE_MAX_AGE_HOURS   = float(os.environ.get("QUEUE_MAX_AGE_HOURS", "4"))  # purge items older than this
-MIN_QUEUE_THRESHOLD   = int(os.environ.get("MIN_QUEUE_THRESHOLD", "2"))
-MIN_POST_GAP_MINS     = float(os.environ.get("MIN_POST_GAP_MINS", "45"))
+STARTUP_GRACE_MINS    = float(os.environ.get("STARTUP_GRACE_MINS", "30"))
+QUEUE_MAX_AGE_HOURS   = float(os.environ.get("QUEUE_MAX_AGE_HOURS", "4"))
 BREAKING_SCORE        = int(os.environ.get("BREAKING_SCORE_THRESHOLD", "6"))
 DRY_RUN               = os.environ.get("DRY_RUN", "false").lower() == "true"
 ENABLE_REPLIES        = os.environ.get("ENABLE_REPLIES", "false").lower() == "true"
-POST_INTERVAL_SECS    = int(os.environ.get("POST_INTERVAL_SECS", "180"))  # gap between posts in a run
+POST_INTERVAL_SECS    = int(os.environ.get("POST_INTERVAL_SECS", "180"))
 
 DATA_DIR     = Path("/data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -155,7 +153,7 @@ MODE_CHAR_LIMITS = {
     "news":     1000,
     "stat":      900,
     "take":     2000,
-    "matchday": 2000,
+    "matchday":  500,
     "list":     4000,
     "reply":     280,
 }
@@ -207,7 +205,7 @@ MODE_INSTRUCTIONS = {
 
     "take": (
         "TASK — SHARP TAKE / NARRATIVE\n"
-        "A confident, data-backed take. Can be pre-match hype or post-match reaction.\n\n"
+        "Write about the FEATURED FIXTURE in the context block — that specific match only.\n\n"
         "POST-MATCH NARRATIVE PATTERN:\n"
         "  1. Open with calm authority: 'No shock. No noise. @beteye_ already knew what was coming.'\n"
         "  2. Tell the story in tight paragraphs — 2–3 sentences each, blank line between\n"
@@ -242,36 +240,32 @@ MODE_INSTRUCTIONS = {
     ),
 
     "matchday": (
-        "TASK — MATCH DAY PREVIEW\n"
-        "Write a pre-match hype post covering tonight's WC 2026 fixtures. "
-        "Use TODAY'S WC 2026 FIXTURES as your PRIMARY source. "
-        "Pull extra context (stats, records, storylines) from ARTICLE CONTENT.\n\n"
-        "STRUCTURE:\n"
-        "  1. Historical hook — one or two sentences about past champions, legendary moments, or a parallel that frames tonight's stakes.\n"
-        "     Examples: 'Nobody who ever won the World Cup did it playing it safe.' / 'Brazil have been here 5 times. They know exactly what this feeling is.'\n\n"
-        "  2. Tonight's fixtures — one crisp paragraph per match (2–3 sentences max):\n"
-        "     - Team A vs Team B — the key tension or storyline\n"
-        "     - A specific player, record, or stat that matters\n"
-        "     - One short punchy kicker sentence\n\n"
-        "  3. Intelligence pivot:\n"
-        "     'Every edge you ever missed in any game was visible to someone.'\n"
-        "     'That someone is @BetEye. 👁'\n\n"
-        "  4. Closing — bold directive, no question mark:\n"
-        "     'Don't be on the wrong side of this.' / 'Follow @beteye before kickoff.'\n\n"
-        "FORMAT: Each sentence on its own line. Blank line between each fixture block.\n"
-        "RULES: Specific names and stats only. No outlet names. No hedging. Max ONE question mark.\n\n"
+        "TASK — PRE-MATCH HYPE (ONE GAME ONLY)\n"
+        "Write about EXACTLY the fixture in HEADLINE. One match. Nothing else.\n\n"
+        "STRUCTURE (each sentence on its own line, blank line between sections):\n"
+        "  [Hook — a stat, record, rivalry, or storyline that makes THIS specific game unmissable. 1–2 sentences.]\n\n"
+        "  [Kickoff bare facts — TIME ET · STADIUM/CITY · Group X.]\n"
+        "  [The key tension — one player, one number, one reason to watch.]\n"
+        "  [Edge — one punchy kicker. Can be a prediction or a sharp take.]\n\n"
+        "  Every edge you ever missed in any game was visible to someone.\n"
+        "  That someone is @BetEye. 👁\n\n"
+        "  [Close — 1 directive line. No question mark. Example: 'Don't miss this one.' / 'Follow before kickoff.']\n\n"
+        "RULES:\n"
+        "- This match ONLY. Do not mention any other game.\n"
+        "- Use kickoff time and venue from FEATURED FIXTURE.\n"
+        "- Specific: name players, cite a real number, name the stadium.\n"
+        "- Max ONE question mark in the entire post.\n"
+        "- Max 400 chars total.\n\n"
         "EXAMPLE OUTPUT:\n"
-        "Nobody who ever won the World Cup did it without earning every single result.\n\n"
-        "France vs Senegal — 3PM ET, Kansas City.\n"
-        "Mbappé leads a squad that has never lost a World Cup group stage game under this coach.\n"
-        "Senegal lost Sadio Mané in 2022 and still reached the last 16. They don't blink.\n\n"
-        "Argentina vs Algeria — 9PM ET, Houston.\n"
-        "Defending champions. Messi's tournament. Algeria ended a 32-year World Cup absence to get here.\n"
-        "That storyline alone.\n\n"
+        "France haven't lost a World Cup group stage game in 12 years.\n"
+        "Senegal ended that streak once before. 2002. Remember.\n\n"
+        "3PM ET · MetLife Stadium · Group I.\n"
+        "Mbappé vs Édouard Mendy. The one duel that decides this.\n"
+        "Senegal don't concede goals — they concede moments.\n\n"
         "Every edge you ever missed in any game was visible to someone.\n"
         "That someone is @BetEye. 👁\n\n"
-        "Don't be on the wrong side of tonight.\n\n"
-        "Max 2000 chars."
+        "Set your alarm.\n\n"
+        "Max 500 chars."
     ),
 
     "news": (
@@ -438,13 +432,13 @@ def _mark_slot_posted(slot_key: str) -> None:
 
 def _fixture_to_item(fixture: dict, mode: str) -> dict:
     """Synthesise a queue item from fixture data for scheduled matchday/stat posts."""
-    home    = fixture["home"]
-    away    = fixture["away"]
-    group   = fixture.get("group", "?")
-    kickoff = fixture.get("kickoff_et", "TBD")
-    venue   = fixture.get("venue", "")
-    city    = fixture.get("city", "")
-    md      = fixture.get("matchday", 1)
+    home      = fixture["home"]
+    away      = fixture["away"]
+    group     = fixture.get("group", "?")
+    kickoff   = fixture.get("kickoff_et", "TBD")
+    venue     = fixture.get("venue", "")
+    city      = fixture.get("city", "")
+    md        = fixture.get("matchday", 1)
     venue_str = f"{venue}, {city}" if venue and city else city or venue
     return {
         "title":        f"{home} vs {away} — WC 2026 Group {group} MD{md}, {kickoff} ET",
@@ -459,6 +453,9 @@ def _fixture_to_item(fixture: dict, mode: str) -> dict:
         "collected_at": datetime.now(timezone.utc).isoformat(),
         "is_breaking":  False,
         "url":          "",
+        # Internal — not sent to API. Used by _generate_post and image_gen to
+        # scope content to exactly this match, not all of today's fixtures.
+        "_fixture":     fixture,
     }
 
 
@@ -504,8 +501,15 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
     instruction = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["news"])
     char_limit  = MODE_CHAR_LIMITS.get(mode, 280)
 
-    # Today's WC fixture context — injected so model can write "tonight" naturally
-    fixture_ctx = get_fixture_context_block()
+    # WC fixture context injection.
+    # For scheduled single-fixture posts, scope to ONLY that match so the model
+    # doesn't write about other games. For everything else, inject today's full slate.
+    specific_fx = item.get("_fixture")
+    if specific_fx and mode in ("matchday", "stat", "take"):
+        from wc_fixtures import format_match_context
+        fixture_ctx = format_match_context([specific_fx], "FEATURED FIXTURE")
+    else:
+        fixture_ctx = get_fixture_context_block()
     fixture_block = f"\n{fixture_ctx}\n" if fixture_ctx else ""
 
     # Inject learned intelligence
@@ -593,11 +597,9 @@ async def collect_job() -> None:
         _current_collect_interval = desired_mins
         log.info(f"[collect] Interval → {desired_mins}min ({'match-day' if is_match_day() else 'normal'})")
 
-    effective_threshold = mc.get("min_threshold") or MIN_QUEUE_THRESHOLD
-    effective_gap       = mc.get("min_gap_mins")  or MIN_POST_GAP_MINS
-    breaking_score      = mc.get("breaking_score") or BREAKING_SCORE
+    breaking_score = mc.get("breaking_score") or BREAKING_SCORE
 
-    log.info(f"[collect] Fetching — threshold={effective_threshold} gap={effective_gap}min breaking≥{breaking_score}")
+    log.info(f"[collect] Fetching — breaking≥{breaking_score} | schedule drives regular posts")
 
     seen: list        = _load_json(SEEN_FILE, [])
     seen_set: set     = set(seen)
@@ -1134,7 +1136,6 @@ async def main() -> None:
     log.info(
         f"Beteye starting | "
         f"collect={initial_collect_mins}min | "
-        f"threshold={MIN_QUEUE_THRESHOLD} items | gap={MIN_POST_GAP_MINS}min | "
         f"breaking_score≥{BREAKING_SCORE} | posts_per_run={POSTS_PER_RUN} | "
         f"daily_cap={DAILY_POST_MAX} | "
         f"replies={'on' if ENABLE_REPLIES else 'off'} | dry_run={DRY_RUN}"

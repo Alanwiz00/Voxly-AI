@@ -118,26 +118,26 @@ def build_daily_schedule(
         if stat_count >= MODE_DAILY_CAPS["stat"]:
             break
 
-    # ── 3. Take posts — post-match buzz windows, max 2/day ─────────────────
-    take_times: list[datetime] = []
+    # ── 3. Take posts — post-match reaction for the most hyped fixtures ─────
+    # Pick top-2 by hype score (both-marquee > one-marquee > none).
+    # Tiebreak: prefer LATER kickoffs — bigger games tend to kick off later and draw more post-match buzz.
+    # Each take fires 110min after that fixture's kickoff (~full time + stoppage).
+    by_hype = sorted(by_kickoff, key=lambda f: (-_hype_score(f), -_kickoff_et(f).timestamp()))
+    take_fixtures = by_hype[: MODE_DAILY_CAPS["take"]]
 
-    if len(by_kickoff) == 1:
-        ko = _kickoff_et(by_kickoff[0])
-        take_times = [ko + timedelta(minutes=60), ko + timedelta(minutes=110)]
-    elif len(by_kickoff) >= 2:
-        first_ko = _kickoff_et(by_kickoff[0])
-        last_ko  = _kickoff_et(by_kickoff[-1])
-        take_times = [first_ko + timedelta(minutes=110), last_ko + timedelta(minutes=110)]
-
-    for take_idx, take_at in enumerate(take_times):
+    for fx in take_fixtures:
+        ko      = _kickoff_et(fx)
+        take_at = ko + timedelta(minutes=110)
         if take_at <= now:
             continue
+        slug     = f"{fx['home']}_{fx['away']}"
+        slot_key = f"take_{fx.get('date', today_str)}_{slug}"
         slots.append(PostSlot(
             run_at=take_at,
             mode="take",
-            fixture=None,
-            label="take: post-match reaction",
-            slot_key=f"take_{today_str}_{take_idx}",
+            fixture=fx,
+            label=f"take: {fx['home']} vs {fx['away']} reaction",
+            slot_key=slot_key,
         ))
 
     # ── 4. News post — 09:30 ET fixed slot ─────────────────────────────────

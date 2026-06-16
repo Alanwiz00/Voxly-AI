@@ -309,7 +309,8 @@ async def _single_match(fx: dict) -> Path:
     draw.text((CARD_W - 50, 630), "@beteye_  ·  #WC2026",
               font=F["small"], fill=GREY_DIM, anchor="rt")
 
-    out = TMP_DIR / f"match_{fx.get('fixture_id', 'x')}.png"
+    slug = f"{fx.get('home','?')}_{fx.get('away','?')}_{fx.get('date','')}".replace(" ", "_")
+    out  = TMP_DIR / f"match_{slug}.png"
     img.convert("RGB").save(out, "PNG", optimize=True)
     return out
 
@@ -497,13 +498,25 @@ async def generate_post_image(
     """
     Generate the most contextually relevant image for a post.
     Returns path to a PNG in TMP_DIR, or None on failure.
+
+    For scheduled matchday/stat posts, item["_fixture"] holds the specific fixture
+    so we generate a single-match card rather than a multi-game list.
     """
     try:
-        if mode == "matchday" and today_fixtures:
-            # Multi-fixture card when there are 2+ games today
-            return await match_card(today_fixtures)
+        if mode == "matchday":
+            # Prefer the specific fixture attached to this scheduled post
+            fx = item.get("_fixture")
+            if fx:
+                return await match_card([fx])          # single-match card
+            if today_fixtures:
+                return await match_card(today_fixtures[:1])  # fallback: first of today
+            return branded_card()
 
         if mode == "stat":
+            # Show the fixture card + stat overlay
+            fx = item.get("_fixture")
+            if fx:
+                return await match_card([fx])
             lines    = [l.strip() for l in post_text.split("\n") if l.strip()]
             headline = lines[0] if lines else item.get("title", "")[:80]
             context  = lines[1:4]
@@ -511,9 +524,11 @@ async def generate_post_image(
 
         if mode == "news":
             mood = "intense" if item.get("is_breaking") else "calm"
-            # If news is about a team playing today, show their match card
+            # If the news concerns a team playing today, show their match card
             if today_fixtures and _news_about_today(item, today_fixtures):
-                return await match_card(today_fixtures[:1])
+                relevant = [f for f in today_fixtures
+                            if _news_about_today(item, [f])]
+                return await match_card(relevant[:1])
             return branded_card(mood=mood)
 
         if mode == "take":

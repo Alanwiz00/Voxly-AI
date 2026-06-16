@@ -130,32 +130,46 @@ services:
     build: ./beteye-agent
     restart: unless-stopped
     environment:
+      # ── Core ──────────────────────────────────────────────────────────────
       - VOXLY_API_URL=http://backend:8000
       - VOXLY_API_KEY=${BETEYE_API_KEY}
       - PERSONA_ID=${BETEYE_PERSONA_ID:-}
-      - COLLECT_INTERVAL_MINS=${BETEYE_COLLECT_INTERVAL_MINS:-30}
-      - FALLBACK_POST_HOURS=${BETEYE_FALLBACK_POST_HOURS:-4}
-      - POSTS_PER_RUN=${BETEYE_POSTS_PER_RUN:-1}
-      - MIN_QUEUE_THRESHOLD=${BETEYE_MIN_QUEUE_THRESHOLD:-2}
-      - MIN_POST_GAP_MINS=${BETEYE_MIN_POST_GAP_MINS:-45}
-      - BREAKING_SCORE_THRESHOLD=${BETEYE_BREAKING_SCORE_THRESHOLD:-6}
       - DRY_RUN=${BETEYE_DRY_RUN:-false}
-      - ENABLE_REPLIES=${BETEYE_ENABLE_REPLIES:-false}
-      - MATCHDAY_COLLECT_MINS=${BETEYE_MATCHDAY_COLLECT_MINS:-10}
+
+      # ── Twitter / X credentials ───────────────────────────────────────────
+      # App must have Read+Write permissions; tokens must be regenerated after
+      # changing permissions in the Developer Portal.
       - X_API_KEY=${X_API_KEY}
       - X_API_SECRET=${X_API_SECRET}
       - X_ACCESS_TOKEN=${X_ACCESS_TOKEN}
       - X_ACCESS_TOKEN_SECRET=${X_ACCESS_TOKEN_SECRET}
+
+      # ── Schedule knobs ────────────────────────────────────────────────────
+      # DAILY_POST_MAX   — hard ceiling across all modes (default 15)
+      # BREAKING_SCORE   — score threshold that bypasses the schedule (default 6)
+      # STARTUP_GRACE    — minutes after start where collect_job is read-only (default 30)
+      - DAILY_POST_MAX=${BETEYE_DAILY_POST_MAX:-15}
+      - BREAKING_SCORE_THRESHOLD=${BETEYE_BREAKING_SCORE_THRESHOLD:-6}
+      - STARTUP_GRACE_MINS=${BETEYE_STARTUP_GRACE_MINS:-30}
+
+      # ── Collector ─────────────────────────────────────────────────────────
+      - COLLECT_INTERVAL_MINS=${BETEYE_COLLECT_INTERVAL_MINS:-30}
+      - MAX_CONTENT_AGE_HOURS=${BETEYE_MAX_CONTENT_AGE_HOURS:-2}
+      - QUEUE_MAX_AGE_HOURS=${BETEYE_QUEUE_MAX_AGE_HOURS:-4}
+      - TRANSCRIPT_MAX_CHARS=${BETEYE_TRANSCRIPT_MAX_CHARS:-2000}
+
+      # ── Sources ───────────────────────────────────────────────────────────
       - EXTRA_NEWS_FEEDS=${BETEYE_EXTRA_NEWS_FEEDS:-}
       - EXTRA_X_ACCOUNTS=${BETEYE_EXTRA_X_ACCOUNTS:-}
       - EXTRA_YOUTUBE_CHANNELS=${BETEYE_EXTRA_YOUTUBE_CHANNELS:-}
-      - MAX_CONTENT_AGE_HOURS=${BETEYE_MAX_CONTENT_AGE_HOURS:-2}
-      - TRANSCRIPT_MAX_CHARS=${BETEYE_TRANSCRIPT_MAX_CHARS:-2000}
-      - POST_INTERVAL_SECS=${BETEYE_POST_INTERVAL_SECS:-180}
-      - DAILY_POST_MAX=${BETEYE_DAILY_POST_MAX:-15}
-      - STARTUP_GRACE_MINS=${BETEYE_STARTUP_GRACE_MINS:-30}
-      - QUEUE_MAX_AGE_HOURS=${BETEYE_QUEUE_MAX_AGE_HOURS:-4}
+
+      # ── Fixtures API ──────────────────────────────────────────────────────
       - APISPORTS_KEY=${APISPORTS_KEY:-}
+
+      # ── Breaking-news posting (bypasses schedule) ─────────────────────────
+      - POSTS_PER_RUN=${BETEYE_POSTS_PER_RUN:-1}
+      - POST_INTERVAL_SECS=${BETEYE_POST_INTERVAL_SECS:-180}
+      - ENABLE_REPLIES=${BETEYE_ENABLE_REPLIES:-false}
     volumes:
       - ./beteye-agent:/app
       - beteye-data:/data
