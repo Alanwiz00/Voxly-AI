@@ -33,7 +33,7 @@ MODE_DAILY_CAPS: dict[str, int] = {
     "list":      1,
 }
 
-DAILY_POST_MAX = 15  # ceiling on any single day
+DAILY_POST_MAX = 20  # ceiling on any single day
 
 
 @dataclass
