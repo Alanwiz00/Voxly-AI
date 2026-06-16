@@ -402,3 +402,33 @@ def has_fixtures_today() -> bool:
 
 def fixture_count_today() -> int:
     return len(get_todays_fixtures())
+
+
+async def fetch_fixture_result(fixture_id: int | None) -> dict | None:
+    """
+    Fetch current score and status for a fixture by API Football ID.
+    Returns dict with home_goals, away_goals, status, elapsed — or None on failure.
+    """
+    if not _APISPORTS_KEY or not fixture_id:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{_APISPORTS_URL}/fixtures",
+                params={"id": fixture_id},
+                headers={"x-apisports-key": _APISPORTS_KEY},
+            )
+            resp.raise_for_status()
+            data = resp.json().get("response", [])
+            if not data:
+                return None
+            f = data[0]
+            return {
+                "home_goals": f["goals"].get("home"),
+                "away_goals": f["goals"].get("away"),
+                "status":     f["fixture"]["status"].get("short", "NS"),
+                "elapsed":    f["fixture"]["status"].get("elapsed"),
+            }
+    except Exception as e:
+        log.warning(f"[fixtures] fetch_fixture_result({fixture_id}) failed: {e}")
+        return None

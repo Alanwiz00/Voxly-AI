@@ -401,9 +401,9 @@ async def _single_match(fx: dict) -> Path:
     )
 
     flag_cy   = 300
-    flag_y    = flag_cy - flag_h // 2          # top of flag images
-    home_cx   = 235                            # flag centre-x, home side
-    away_cx   = CARD_W - 235                   # flag centre-x, away side
+    flag_y    = flag_cy - flag_h // 2
+    home_cx   = 235
+    away_cx   = CARD_W - 235
     home_fx   = home_cx - flag_w // 2
     away_fx   = away_cx - flag_w // 2
 
@@ -416,7 +416,6 @@ async def _single_match(fx: dict) -> Path:
             radius=16, outline=(*CYAN_MID, 100), width=2,
         )
 
-    # Paste flags (or initials fallback in the old circular style)
     for cx, name, flag_img, x in (
         (home_cx, home_name, home_flag, home_fx),
         (away_cx, away_name, away_flag, away_fx),
@@ -459,6 +458,138 @@ async def _single_match(fx: dict) -> Path:
 
     slug = f"{fx.get('home','?')}_{fx.get('away','?')}_{fx.get('date','')}".replace(" ", "_")
     out  = TMP_DIR / f"match_{slug}.png"
+    img.convert("RGB").save(out, "PNG", optimize=True)
+    return out
+
+
+async def _take_card(fx: dict, result: dict | None = None) -> Path:
+    """
+    Post-match card for take posts — compact layout with bold final scoreline.
+    result = {"home_goals": int, "away_goals": int, "status": "FT"|"HT"|"NS", "elapsed": int|None}
+    """
+    img, draw = _new_card()
+
+    home_name = fx.get("home", "Home")
+    away_name = fx.get("away", "Away")
+
+    has_score = (result is not None and result.get("home_goals") is not None)
+    is_ft     = result and result.get("status") in ("FT", "AET", "PEN")
+    is_live   = result and result.get("status") in ("1H", "HT", "2H", "ET", "P")
+
+    # Background glows — brighter centre when score is available
+    _glow(img, 210,          300, 360, CYAN_MID, 0.12)
+    _glow(img, CARD_W - 210, 300, 360, CYAN_MID, 0.12)
+    glow_str = 0.22 if has_score else 0.10
+    _glow(img, CARD_W // 2, 300, 200, CYAN, glow_str)
+
+    # Top band
+    draw.rectangle((0, 0, CARD_W, 68), fill=BLUE_DARK + (255,))
+    band_label = (f"FIFA WORLD CUP 2026  ·  GROUP {fx.get('group', '?')}"
+                  f"  ·  MATCHDAY {fx.get('matchday', '?')}")
+    _text_c(draw, band_label, 20, F["label"], (*CYAN_MID, 220))
+
+    # Status badge top-right
+    if is_ft:
+        draw.text((CARD_W - 24, 20), "FULL TIME", font=F["label"],
+                  fill=(*CYAN, 230), anchor="rt")
+    elif is_live:
+        elapsed = result.get("elapsed") or ""
+        badge   = f"LIVE  {elapsed}′" if elapsed else "LIVE"
+        draw.text((CARD_W - 24, 20), badge, font=F["label"],
+                  fill=(255, 80, 80, 240), anchor="rt")
+
+    draw.line([(0, 68), (CARD_W, 68)], fill=(*CYAN, 160), width=2)
+
+    # Compact flags — 240×160
+    flag_w, flag_h = 240, 160
+    home_url = TEAM_FLAGS.get(home_name) or fx.get("home_logo", "")
+    away_url = TEAM_FLAGS.get(away_name) or fx.get("away_logo", "")
+    home_flag, away_flag = await asyncio.gather(
+        _team_logo_rect(home_url, flag_w, flag_h),
+        _team_logo_rect(away_url, flag_w, flag_h),
+    )
+
+    flag_cy = 285
+    flag_y  = flag_cy - flag_h // 2
+    home_cx = 205
+    away_cx = CARD_W - 205
+
+    for cx in (home_cx, away_cx):
+        _glow(img, cx, flag_cy, 130, CYAN, 0.12)
+        draw.rounded_rectangle(
+            (cx - flag_w // 2 - 3, flag_y - 3,
+             cx + flag_w // 2 + 3, flag_y + flag_h + 3),
+            radius=12, outline=(*CYAN_MID, 100), width=2,
+        )
+
+    for cx, name, flag_img in (
+        (home_cx, home_name, home_flag),
+        (away_cx, away_name, away_flag),
+    ):
+        x = cx - flag_w // 2
+        if flag_img:
+            img.alpha_composite(flag_img, (x, flag_y))
+        else:
+            fb = _initials_circle(name, flag_h)
+            img.alpha_composite(fb, (cx - flag_h // 2, flag_y))
+        draw.text((cx, flag_y + flag_h + 12), name.upper(),
+                  font=F["sub"], fill=WHITE, anchor="mt")
+
+    # Centre — bold scoreline or VS
+    cx = CARD_W // 2
+    if has_score:
+        hg      = str(result["home_goals"])
+        ag      = str(result["away_goals"])
+        score_y = flag_cy - 62
+
+        draw.text((cx - 24, score_y), hg, font=F["hero"], fill=WHITE, anchor="rt")
+        draw.text((cx,      score_y + 10), "—", font=F["big"], fill=CYAN, anchor="mt")
+        draw.text((cx + 24, score_y), ag, font=F["hero"], fill=WHITE, anchor="lt")
+
+        # Status pill
+        if is_ft:
+            pill_text = "FULL TIME"
+        elif result.get("status") == "HT":
+            pill_text = "HALF TIME"
+        else:
+            elapsed = result.get("elapsed", "")
+            pill_text = f"{elapsed}′  LIVE" if elapsed else "LIVE"
+
+        pill_w = 210
+        pill_x = cx - pill_w // 2
+        pill_y = score_y + 110
+        draw.rounded_rectangle((pill_x, pill_y, pill_x + pill_w, pill_y + 32),
+                                radius=8, fill=BLUE_DARK + (220,),
+                                outline=(*CYAN, 180), width=2)
+        _text_c(draw, pill_text, pill_y + 6, F["tiny"], (*CYAN, 230))
+    else:
+        _glow(img, cx, flag_cy, 110, CYAN, 0.28)
+        draw.text((cx, flag_cy - 60), "VS", font=F["hero"], fill=CYAN, anchor="mt")
+        kickoff = fx.get("kickoff_et", "TBD")
+        draw.text((cx, flag_cy + 48), f"{kickoff} ET",
+                  font=F["sub"], fill=(*GREY, 210), anchor="mt")
+
+    # ECG
+    ecg_y = 455
+    _ecg(draw, 50, CARD_W - 50, ecg_y, (*CYAN, 200), width=3)
+
+    # Venue meta
+    city  = fx.get("city", "")
+    venue = fx.get("venue", "")
+    meta  = "  ·  ".join(filter(None, [city, venue]))
+    if meta:
+        _text_c(draw, meta, 476, F["small"], GREY_DIM)
+
+    # Bottom bar
+    draw.rectangle((0, 600, CARD_W, CARD_H), fill=BLUE_DARK + (255,))
+    draw.line([(0, 600), (CARD_W, 600)], fill=(*CYAN, 180), width=2)
+    _logo(img, w=180, x=40, y=612)
+    draw.text((CARD_W - 50, 630), "@beteye_  ·  #WC2026",
+              font=F["small"], fill=GREY_DIM, anchor="rt")
+
+    slug   = f"{fx.get('home','?')}_{fx.get('away','?')}_{fx.get('date','')}".replace(" ", "_")
+    suffix = "_ft" if is_ft else ("_live" if is_live else "_take")
+    out    = TMP_DIR / f"take_{slug}{suffix}.png"
     img.convert("RGB").save(out, "PNG", optimize=True)
     return out
 
@@ -588,45 +719,104 @@ def stat_card(headline: str, context: list[str], label: str = "WC 2026 STAT") ->
 # Atmospheric BetEye background — take / narrative / news posts
 # ---------------------------------------------------------------------------
 
-def branded_card(mood: str = "default") -> Path:
+def branded_card(mood: str = "default", headline: str = "", sub: str = "") -> Path:
     """
-    mood: 'default' | 'intense' (breaking / big moment) | 'calm' (analysis / intel)
+    Intelligence-dashboard card for news / take / list posts.
+    mood: 'default' | 'intense' | 'calm'
+    headline: optional short text to display prominently (e.g. match result)
+    sub: optional secondary line
     """
     img, draw = _new_card()
 
+    # ── Background glow composition ───────────────────────────────────────────
     if mood == "intense":
-        _glow(img, CARD_W // 2, CARD_H // 2, 550, CYAN, 0.20)
-        _glow(img, CARD_W // 2, CARD_H // 2, 260, CYAN, 0.12)
-        _glow(img, CARD_W // 2, CARD_H // 2, 100, WHITE, 0.04)
+        _glow(img, CARD_W // 2, CARD_H // 2, 560, CYAN,     0.22)
+        _glow(img, CARD_W // 2, CARD_H // 2, 260, CYAN,     0.14)
+        _glow(img, 80,          80,           280, CYAN_MID, 0.10)
+        _glow(img, CARD_W - 80, CARD_H - 80, 280, CYAN_MID, 0.10)
     elif mood == "calm":
-        _glow(img, 120, CARD_H // 2, 420, CYAN_MID, 0.13)
-        _glow(img, CARD_W - 120, CARD_H // 2, 380, BLUE_DEEP, 0.20)
+        _glow(img, 140,          CARD_H // 2, 440, CYAN_MID, 0.14)
+        _glow(img, CARD_W - 140, CARD_H // 2, 380, BLUE_DEEP, 0.20)
+        _glow(img, CARD_W // 2,  CARD_H,      340, BLUE_DEEP, 0.16)
     else:
-        _glow(img, CARD_W // 2, 160, 450, CYAN_MID, 0.15)
-        _glow(img, CARD_W // 2, CARD_H, 380, BLUE_DEEP, 0.22)
+        _glow(img, CARD_W // 2, 140,      460, CYAN_MID, 0.16)
+        _glow(img, CARD_W // 2, CARD_H,   380, BLUE_DEEP, 0.24)
+        _glow(img, 180,         CARD_H - 100, 260, CYAN_MID, 0.09)
 
-    # Subtle grid overlay — data/tech feel
-    grid_c = (0, 80, 140, 22)
-    for x in range(0, CARD_W, 80):
+    # ── Circuit / data-grid overlay ───────────────────────────────────────────
+    grid_c = (0, 80, 140, 16)
+    for x in range(0, CARD_W, 60):
         draw.line([(x, 0), (x, CARD_H)], fill=grid_c, width=1)
-    for y in range(0, CARD_H, 80):
+    for y in range(0, CARD_H, 60):
         draw.line([(0, y), (CARD_W, y)], fill=grid_c, width=1)
 
-    # Top + bottom cyan bars
-    draw.rectangle((0, 0, CARD_W, 5), fill=(*CYAN, 255))
+    # Scatter network nodes at grid intersections (random-looking but deterministic)
+    node_positions = [
+        (60, 60), (300, 120), (900, 60), (1140, 120),
+        (180, 540), (480, 480), (720, 555), (1020, 510),
+        (60, 360), (1140, 300),
+    ]
+    for nx, ny in node_positions:
+        r = 4
+        draw.ellipse((nx - r, ny - r, nx + r, ny + r),
+                     fill=(*CYAN, 90), outline=(*CYAN, 160), width=1)
+
+    # Connecting lines between some nodes (graph/intel feel)
+    node_links = [(0, 1), (1, 2), (2, 3), (4, 5), (5, 6), (6, 7), (8, 4)]
+    for a, b in node_links:
+        x1, y1 = node_positions[a]
+        x2, y2 = node_positions[b]
+        draw.line([(x1, y1), (x2, y2)], fill=(*CYAN_MID, 30), width=1)
+
+    # ── Top band ──────────────────────────────────────────────────────────────
+    draw.rectangle((0, 0, CARD_W, 68), fill=BLUE_DARK + (255,))
+    draw.rectangle((0, 0, CARD_W, 5),  fill=(*CYAN, 255))
+    draw.line([(0, 68), (CARD_W, 68)], fill=(*CYAN, 140), width=2)
+    _text_c(draw, "FIFA WORLD CUP 2026  ·  INTELLIGENCE UPDATE",
+            22, F["label"], (*CYAN_MID, 220))
+
+    # ── Left accent bar ───────────────────────────────────────────────────────
+    draw.rectangle((0, 0, 6, CARD_H), fill=(*CYAN, 200))
+
+    # ── Main content area ─────────────────────────────────────────────────────
+    if headline:
+        # Headline display mode — text is the hero
+        logo_w = 220
+        _logo(img, w=logo_w, x=40, y=90, opacity=0.85)
+
+        lines = _wrap_lines(headline.upper(), F["title"], CARD_W - 160)
+        y = 140
+        for i, line in enumerate(lines[:3]):
+            color = CYAN if i == 0 else WHITE
+            _text_c(draw, line, y, F["title"], color)
+            bb = draw.textbbox((0, y), line, font=F["title"])
+            y = bb[3] + 10
+
+        if sub:
+            _text_c(draw, sub, y + 18, F["body"], GREY)
+
+        # Large ECG spanning the bottom third
+        ecg_y = 480
+        _ecg(draw, 40, CARD_W - 40, ecg_y, (*CYAN, 200), width=5)
+        _ecg(draw, 40, CARD_W - 40, ecg_y + 36, (*CYAN_MID, 55), width=2)
+
+    else:
+        # Logo-hero mode — BetEye identity is the centrepiece
+        logo_w = 460
+        _logo(img, w=logo_w, x=(CARD_W - logo_w) // 2, y=130, opacity=0.97)
+
+        # Triple ECG — main + two ghost waves for depth
+        ecg_y = int(CARD_H * 0.68)
+        _ecg(draw, 50, CARD_W - 50, ecg_y,      (*CYAN,     210), width=5)
+        _ecg(draw, 50, CARD_W - 50, ecg_y + 32, (*CYAN_MID,  55), width=2)
+        _ecg(draw, 50, CARD_W - 50, ecg_y - 32, (*BLUE_DEEP, 80), width=2)
+
+    # ── Bottom bar ────────────────────────────────────────────────────────────
     draw.rectangle((0, CARD_H - 5, CARD_W, CARD_H), fill=(*CYAN, 255))
-
-    # ECG line at ~58% height
-    ecg_y = int(CARD_H * 0.60)
-    _ecg(draw, 60, CARD_W - 60, ecg_y, (*CYAN, 185), width=4)
-
-    # Central logo — large and prominent
-    logo_w = 440
-    _logo(img, w=logo_w, x=(CARD_W - logo_w) // 2, y=150, opacity=0.97)
-
-    # Tagline
     _text_c(draw, "BETTING INTELLIGENCE  ·  WC 2026",
-            CARD_H - 52, F["label"], (*GREY_DIM, 200))
+            CARD_H - 40, F["label"], (*GREY_DIM, 200))
+    draw.text((CARD_W - 50, CARD_H - 40), "@beteye_",
+              font=F["label"], fill=(*CYAN_MID, 180), anchor="rt")
 
     out = TMP_DIR / f"brand_{mood}_{int(datetime.now(timezone.utc).timestamp())}.png"
     img.convert("RGB").save(out, "PNG", optimize=True)
@@ -672,15 +862,23 @@ async def generate_post_image(
 
         if mode == "news":
             mood = "intense" if item.get("is_breaking") else "calm"
-            # If the news concerns a team playing today, show their match card
+            # If news is about a team with a fixture today, show their match card
             if today_fixtures and _news_about_today(item, today_fixtures):
                 relevant = [f for f in today_fixtures
                             if _news_about_today(item, [f])]
                 return await match_card(relevant[:1])
-            return branded_card(mood=mood)
+            # Extract a short headline from title for card text (strips trailing ellipsis)
+            raw_title = item.get("title", "")
+            hl = raw_title[:55].rsplit(" ", 1)[0] if len(raw_title) > 55 else raw_title
+            return branded_card(mood=mood, headline=hl)
 
         if mode == "take":
-            return branded_card(mood="calm")
+            fx = item.get("_fixture")
+            if fx:
+                from wc_fixtures import fetch_fixture_result
+                result = await fetch_fixture_result(fx.get("fixture_id"))
+                return await _take_card(fx, result=result)
+            return branded_card(mood="intense")
 
         if mode == "list":
             return branded_card(mood="default")

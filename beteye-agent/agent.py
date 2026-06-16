@@ -273,20 +273,32 @@ MODE_INSTRUCTIONS = {
     ),
 
     "news": (
-        "TASK — BREAKING DEVELOPMENT\n"
-        "Report what happened. No outlet. No hedging.\n\n"
-        "FORMAT (blank line between sections):\n"
-        "  [The fact — 1 line. Specific: names, numbers, dates.]\n\n"
-        "  [Why it matters for the tournament — 1–2 lines]\n\n"
-        "  [If a team from this story plays in TODAY'S FIXTURES, add: '[Team] kick off at [time] ET tonight.']\n\n"
-        + _CLOSING_LINE_GUIDE +
-        "\n\nEXAMPLE OUTPUT:\n"
-        "Rodri will miss the rest of the World Cup group stage with a knee injury.\n\n"
-        "Spain's midfield balance just changed completely.\n"
-        "He was averaging 7.2 ball recoveries per 90 at this tournament.\n\n"
-        "Spain face Saudi Arabia tonight. The shape they play without him is a completely different conversation.\n\n"
-        "Follow @beteye for live updates.\n\n"
-        "Max 1000 chars."
+        "TASK — WC 2026 INTELLIGENCE UPDATE\n"
+        "Report what happened — sharp, specific, no outlet names.\n\n"
+        "⚠ FORMAT — NON-NEGOTIABLE: Every sentence on its own line. No prose paragraphs.\n\n"
+        "STRUCTURE:\n"
+        "  Line 1: The fact. One line. Names, numbers, stakes. Nothing soft.\n"
+        "  Line 2-3: Why it changes something — what it means for the tournament.\n"
+        "  Line 4 (if applicable): Tie to a game in TODAY'S FIXTURES — '[Team] kick off at [time] ET.'\n"
+        "  Line 5: BetEye organic angle — mandatory. Tie the intelligence lens to this specific story.\n"
+        "           NOT the stock phrase. Something specific.\n"
+        "           Examples:\n"
+        "             'This is exactly the kind of shift that changes pre-match models. @BetEye_ 👁'\n"
+        "             'The edge in situations like this belongs to whoever reads it first. @BetEye_ 👁'\n"
+        "             'BetEye members saw the risk in this lineup before kickoff. @BetEye_ 👁'\n\n"
+        "RULES:\n"
+        "- No outlet names. No 'reportedly' or 'according to'.\n"
+        "- Real names, real numbers. Nothing vague.\n"
+        "- @BetEye_ mention is mandatory in the final line.\n"
+        "- At most ONE question mark total. Prefer no question marks.\n"
+        "- Max 500 chars.\n\n"
+        "EXAMPLE OUTPUT:\n"
+        "Rodri will miss the rest of the World Cup group stage.\n"
+        "Spain's midfield shape just changed completely.\n"
+        "7.2 ball recoveries per 90 — no one else in this squad does that.\n"
+        "Spain kick off tonight. Different conversation without him.\n"
+        "The data on Spain's defensive exposure without Rodri has been visible for weeks. @BetEye_ 👁\n\n"
+        "Max 500 chars."
     ),
 
     "list": (
@@ -577,7 +589,7 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
 
     # For line-structured modes: if the API collapsed newlines into a single block,
     # reinsert line breaks after sentence-ending punctuation.
-    if mode in ("matchday", "take", "stat") and "\n" not in text:
+    if mode in ("matchday", "take", "stat", "news") and "\n" not in text:
         import re
         # Insert \n after ". ", "! ", "? " when followed by a capital letter or emoji
         text = re.sub(r'([.!?])\s+(?=[A-Z\U0001F300-\U0001FAFF])', r'\1\n', text)
