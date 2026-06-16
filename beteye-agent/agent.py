@@ -16,14 +16,21 @@ import random
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
 from sources import get_all_items
-from poster import post_tweet, get_tweet_metrics
+from poster import post_tweet, get_tweet_metrics, upload_media
+from image_gen import generate_post_image
 from matchday import get_match_config, is_match_day
+from wc_fixtures import get_fixture_context_block, fixture_count_today, ensure_schedule_fresh, get_todays_fixtures
+from post_schedule import PostSlot, build_daily_schedule, describe_schedule, MODE_DAILY_CAPS
+
+ET = ZoneInfo("America/New_York")
 
 load_dotenv()
 
@@ -39,9 +46,11 @@ log = logging.getLogger("beteye")
 VOXLY_API_URL         = os.environ.get("VOXLY_API_URL", "http://backend:8000")
 VOXLY_API_KEY         = os.environ["VOXLY_API_KEY"]
 PERSONA_ID            = os.environ.get("PERSONA_ID")
-POSTS_PER_RUN         = int(os.environ.get("POSTS_PER_RUN", "4"))
+POSTS_PER_RUN         = int(os.environ.get("POSTS_PER_RUN", "1"))
+DAILY_POST_MAX        = int(os.environ.get("DAILY_POST_MAX", "15"))
 COLLECT_INTERVAL_MINS = float(os.environ.get("COLLECT_INTERVAL_MINS", "30"))
-FALLBACK_POST_HOURS   = float(os.environ.get("FALLBACK_POST_HOURS", "4"))
+STARTUP_GRACE_MINS    = float(os.environ.get("STARTUP_GRACE_MINS", "30"))  # crawl-only window after start
+QUEUE_MAX_AGE_HOURS   = float(os.environ.get("QUEUE_MAX_AGE_HOURS", "4"))  # purge items older than this
 MIN_QUEUE_THRESHOLD   = int(os.environ.get("MIN_QUEUE_THRESHOLD", "2"))
 MIN_POST_GAP_MINS     = float(os.environ.get("MIN_POST_GAP_MINS", "45"))
 BREAKING_SCORE        = int(os.environ.get("BREAKING_SCORE_THRESHOLD", "6"))
@@ -51,6 +60,8 @@ POST_INTERVAL_SECS    = int(os.environ.get("POST_INTERVAL_SECS", "180"))  # gap 
 
 DATA_DIR     = Path("/data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+_AGENT_START_TIME = datetime.now(timezone.utc)  # used to enforce startup grace period
 QUEUE_FILE   = DATA_DIR / "queue.json"
 SEEN_FILE    = DATA_DIR / "seen.json"
 STATE_FILE   = DATA_DIR / "state.json"
@@ -132,17 +143,20 @@ BANNED_PHRASES = (
 )
 
 # ---------------------------------------------------------------------------
-# Content-type modes — each post run cycles through these for variety
+# Content-type modes
 # ---------------------------------------------------------------------------
-POST_MODES = ["news", "stat", "take"]
+POST_MODES = ["news", "stat", "take", "matchday"]
+# Default weights — lean heavily on take + matchday, less raw news
+POST_MODE_DEFAULT_WEIGHTS = [1, 2, 3, 2]  # news:stat:take:matchday
 
 # Per-mode character limits — X Premium Basic allows 4,000 chars
 MODE_CHAR_LIMITS = {
-    "news":  1000,   # full story + context + CTA, no mid-sentence cuts
-    "stat":   800,   # number + full context + CTA
-    "take":  2000,   # proper opinion piece with evidence
-    "list":  4000,   # full ranked list with reasons, closing statement
-    "reply":  280,   # replies stay short — you're in someone else's thread
+    "news":     1000,
+    "stat":      900,
+    "take":     2000,
+    "matchday": 2000,
+    "list":     4000,
+    "reply":     280,
 }
 
 # Detect list/ranking articles that deserve a long-form treatment
@@ -152,89 +166,150 @@ _LIST_TITLE_RE = re.compile(
     re.IGNORECASE,
 )
 
-_CTA_MENU = """
-CTA TYPES — pick whichever fits the post best. NEVER use a question mark.
-  Follow:    "Follow @beteye for [specific thing related to this story]."
-  RT:        "RT this if you're watching live." / "Retweet to spread this."
-  Save:      "Bookmark this — [why it'll matter later]." / "Save this post."
-  Reply:     "Drop your [score / pick / take / prediction] below." / "Reply with your take."
-  Tag:       "Tag someone watching this game." / "Tag a [nationality] fan."
-  Statement: "[Bold one-liner that needs no action — e.g. 'This tournament is already delivering.']"
+# CLOSING LINE GUIDE — one per post, injected into every mode instruction
+_CLOSING_LINE_GUIDE = """\
+CLOSING LINE — pick exactly ONE for the final line of the post:
+  • Question  (engagement): "What are your predictions?" / "Who wins tonight?" / "Drop your pick below 👇"
+  • Directive (action):     "Drop it below 👇" / "Retweet if you agree." / "Tag someone watching tonight."
+  • Brand stamp:            "@BetEye 👁" / "Follow @beteye for more on this." / "That someone is @BetEye. 👁"
+  • Bold statement:         A punchy one-liner that lands on its own — no action needed.
+RULE: Exactly ONE closing line. At most ONE question mark in the entire post.\
 """
 
 MODE_INSTRUCTIONS = {
-    "news": (
-        "TASK — NEWS FLASH\n"
-        "Report the core fact as original insight. DO NOT name any media outlet.\n\n"
-        "FORMAT RULES (non-negotiable):\n"
-        "- Each sentence on its own line\n"
-        "- One blank line between each section\n"
-        "- Section 1: the fact (1-2 lines)\n"
-        "- Section 2: why it matters / what changes (1-2 lines)\n"
-        "- Section 3: one CTA line — choose the type that best fits this story\n\n"
-        + _CTA_MENU +
-        "\nEXAMPLE OUTPUT:\n"
-        "Germany's players are funding bus transport for 600 fans from New York to New Jersey.\n\n"
-        "Train fares were hiked 300% for the tournament. The squad stepped in and covered the cost themselves.\n\n"
-        "Tag a Germany fan who needs to see this.\n\n"
-        "Max 900 chars."
-    ),
+
     "stat": (
         "TASK — STAT DROP\n"
-        "Lead with one number. Make it land. DO NOT credit any source.\n\n"
-        "FORMAT RULES (non-negotiable):\n"
-        "- Each sentence on its own line\n"
-        "- One blank line between each section\n"
-        "- Section 1: the stat alone (1 line — short and punchy)\n"
-        "- Section 2: context that makes the number hit harder (1-2 lines)\n"
-        "- Section 3: one CTA line — choose the type that best fits this stat\n\n"
-        + _CTA_MENU +
-        "\nEXAMPLE OUTPUT:\n"
-        "80% of World Cup knockout goals came from set-piece patterns.\n\n"
-        "Miss these signals, and you miss the game.\n"
-        "Structural intelligence is the real edge.\n\n"
-        "Bookmark this — set pieces will decide who goes home.\n\n"
-        "Max 700 chars."
+        "Lead with ONE hard number from the article. Build from there.\n\n"
+        "VOICE:\n"
+        "  Short sentences. Each one lands on its own line.\n"
+        "  Stack 2–4 stats or facts that make the lead number hit harder.\n"
+        "  Staccato fragments are good for contrast: 'Not Mbappé. Not Neymar. Not Ibrahimović.'\n"
+        "  Understated confidence — don't oversell. Let the number speak.\n"
+        "  If a player or team is involved in TODAY'S FIXTURES, tie it to that match: 'Tonight he's at [city].'\n\n"
+        "FORMAT (each section separated by a blank line):\n"
+        "  [The stat — ONE line, specific number, no source name]\n\n"
+        "  [1–2 lines of context / scale / why it matters]\n\n"
+        "  [Optional staccato contrast: 'Not X. Not Y. Not Z.']\n\n"
+        "  [If relevant: tie to today's match or current tournament moment]\n\n"
+        + _CLOSING_LINE_GUIDE +
+        "\n\nEXAMPLE OUTPUT:\n"
+        "Kvaratskhelia has scored in 4 straight UCL knockout games.\n\n"
+        "No PSG player has ever done that.\n"
+        "Not Mbappé. Not Neymar. Not Ibrahimović.\n\n"
+        "This guy just walked into that conversation quietly.\n\n"
+        "Tonight he's at Anfield.\n"
+        "What market are you betting?\n\n"
+        "Drop it below 👇\n\n"
+        "Max 900 chars."
     ),
+
     "take": (
-        "TASK — SHARP TAKE\n"
-        "State a confident original opinion grounded in a fact from the article. "
-        "DO NOT credit any outlet. No 'according to', no 'reports say'.\n\n"
-        "FORMAT RULES (non-negotiable):\n"
-        "- Each sentence on its own line\n"
-        "- One blank line between each section\n"
-        "- Section 1: the take — bold declarative statement (1-2 lines)\n"
-        "- Section 2: the evidence that backs it up (1-2 lines)\n"
-        "- Section 3: one CTA line — choose the type that best drives engagement for this take\n\n"
-        + _CTA_MENU +
-        "\nEXAMPLE OUTPUT:\n"
-        "The noise is everywhere.\n\n"
-        "Group A is already decided on paper — the real battle is who finishes second.\n"
-        "Three teams within 2 points on goal difference after matchday 1.\n\n"
-        "Drop your Group A finalist below.\n\n"
-        "Max 1800 chars."
+        "TASK — SHARP TAKE / NARRATIVE\n"
+        "A confident, data-backed take. Can be pre-match hype or post-match reaction.\n\n"
+        "POST-MATCH NARRATIVE PATTERN:\n"
+        "  1. Open with calm authority: 'No shock. No noise. @beteye_ already knew what was coming.'\n"
+        "  2. Tell the story in tight paragraphs — 2–3 sentences each, blank line between\n"
+        "  3. Historical depth: a fact that makes the moment feel bigger ('42 years of waiting')\n"
+        "  4. Pivot to intelligence: 'See, this is the thing about data intelligence — it doesn't do guessing.'\n"
+        "     Pattern: 'It sees the pressure. It feels the weight. It finds the patterns.'\n"
+        "  5. Brand stamp: 'While people were reacting, BetEye members were already three steps ahead.'\n"
+        "  6. Closing directive or bold statement — never a question.\n\n"
+        "PRE-MATCH HYPE PATTERN:\n"
+        "  1. Historical hook that parallels tonight's stakes (Sevilla, Falcao, past champions)\n"
+        "  2. One sentence per tonight's specific storyline — each line its own paragraph\n"
+        "  3. Pivot: 'Every edge you ever missed was visible to someone.'\n"
+        "  4. Brand stamp + closing directive: 'Don't be on the wrong side of this.'\n\n"
+        "RULES:\n"
+        "  Each sentence on its own line. Blank line between sections.\n"
+        "  Specific: player names, records, years, goals, stadiums.\n"
+        "  Never say 'according to' or name any outlet.\n"
+        "  At most ONE question mark total.\n\n"
+        + _CLOSING_LINE_GUIDE +
+        "\n\nEXAMPLE OUTPUT (post-match):\n"
+        "No shock. No noise. Just a calm nod because @beteye_ already knew what was coming.\n\n"
+        "He had 99 European goals. You think that man was sleeping?\n"
+        "He made it 100. Right on schedule.\n\n"
+        "42 years of pain sitting in that stadium like unpaid debt.\n"
+        "Tonight it finally cleared.\n\n"
+        "See, this is the thing about data intelligence. It doesn't do guessing.\n"
+        "It sees the pressure a player is carrying.\n"
+        "It finds the patterns everyone else walks past.\n\n"
+        "While people were reacting, BetEye members were already three steps ahead.\n\n"
+        "That composure you're seeing? It comes from information and data leverage.\n\n"
+        "Max 2000 chars."
     ),
+
+    "matchday": (
+        "TASK — MATCH DAY PREVIEW\n"
+        "Write a pre-match hype post covering tonight's WC 2026 fixtures. "
+        "Use TODAY'S WC 2026 FIXTURES as your PRIMARY source. "
+        "Pull extra context (stats, records, storylines) from ARTICLE CONTENT.\n\n"
+        "STRUCTURE:\n"
+        "  1. Historical hook — one or two sentences about past champions, legendary moments, or a parallel that frames tonight's stakes.\n"
+        "     Examples: 'Nobody who ever won the World Cup did it playing it safe.' / 'Brazil have been here 5 times. They know exactly what this feeling is.'\n\n"
+        "  2. Tonight's fixtures — one crisp paragraph per match (2–3 sentences max):\n"
+        "     - Team A vs Team B — the key tension or storyline\n"
+        "     - A specific player, record, or stat that matters\n"
+        "     - One short punchy kicker sentence\n\n"
+        "  3. Intelligence pivot:\n"
+        "     'Every edge you ever missed in any game was visible to someone.'\n"
+        "     'That someone is @BetEye. 👁'\n\n"
+        "  4. Closing — bold directive, no question mark:\n"
+        "     'Don't be on the wrong side of this.' / 'Follow @beteye before kickoff.'\n\n"
+        "FORMAT: Each sentence on its own line. Blank line between each fixture block.\n"
+        "RULES: Specific names and stats only. No outlet names. No hedging. Max ONE question mark.\n\n"
+        "EXAMPLE OUTPUT:\n"
+        "Nobody who ever won the World Cup did it without earning every single result.\n\n"
+        "France vs Senegal — 3PM ET, Kansas City.\n"
+        "Mbappé leads a squad that has never lost a World Cup group stage game under this coach.\n"
+        "Senegal lost Sadio Mané in 2022 and still reached the last 16. They don't blink.\n\n"
+        "Argentina vs Algeria — 9PM ET, Houston.\n"
+        "Defending champions. Messi's tournament. Algeria ended a 32-year World Cup absence to get here.\n"
+        "That storyline alone.\n\n"
+        "Every edge you ever missed in any game was visible to someone.\n"
+        "That someone is @BetEye. 👁\n\n"
+        "Don't be on the wrong side of tonight.\n\n"
+        "Max 2000 chars."
+    ),
+
+    "news": (
+        "TASK — BREAKING DEVELOPMENT\n"
+        "Report what happened. No outlet. No hedging.\n\n"
+        "FORMAT (blank line between sections):\n"
+        "  [The fact — 1 line. Specific: names, numbers, dates.]\n\n"
+        "  [Why it matters for the tournament — 1–2 lines]\n\n"
+        "  [If a team from this story plays in TODAY'S FIXTURES, add: '[Team] kick off at [time] ET tonight.']\n\n"
+        + _CLOSING_LINE_GUIDE +
+        "\n\nEXAMPLE OUTPUT:\n"
+        "Rodri will miss the rest of the World Cup group stage with a knee injury.\n\n"
+        "Spain's midfield balance just changed completely.\n"
+        "He was averaging 7.2 ball recoveries per 90 at this tournament.\n\n"
+        "Spain face Saudi Arabia tonight. The shape they play without him is a completely different conversation.\n\n"
+        "Follow @beteye for live updates.\n\n"
+        "Max 1000 chars."
+    ),
+
     "list": (
-        "TASK — ORIGINAL LIST POST\n"
-        "The source is a ranking or list. Write your OWN curated version using facts from it. "
-        "DO NOT credit the outlet.\n\n"
-        "FORMAT RULES (non-negotiable):\n"
-        "- Hook: 1 punchy line in ALL CAPS\n"
-        "- One blank line\n"
-        "- Numbered items, each on its own line: [Name or concept] — [specific fact]\n"
-        "- One blank line after the list\n"
-        "- Closing: one CTA line — choose the type that best fits this list\n\n"
-        + _CTA_MENU +
-        "\nEXAMPLE OUTPUT:\n"
-        "5 TEAMS THAT WILL DEFINE WC 2026:\n\n"
-        "1. France — Mbappé + Dembélé in peak form. Deepest attack in the tournament.\n"
-        "2. Brazil — Vinícius Jr. leads a squad with 8 Champions League finalists.\n"
-        "3. England — Bellingham anchors a midfield with genuine world-class depth.\n"
-        "4. Spain — Lamine Yamal, 17, starts. The youngest squad at the tournament.\n"
-        "5. Argentina — Defending champions. Messi's last World Cup. Built for this.\n\n"
-        "RT this if your team made the list.\n\n"
+        "TASK — ORIGINAL RANKED LIST\n"
+        "Source is a ranking/list article. Write your OWN curated version. DO NOT credit the outlet.\n\n"
+        "FORMAT:\n"
+        "  [HOOK — ALL CAPS, 1 line: 'X TEAMS THAT WILL DEFINE WC 2026:']\n\n"
+        "  1. [Name/team] — [specific reason, one line]\n"
+        "  2. [Name/team] — [specific reason, one line]\n"
+        "  ...\n\n"
+        + _CLOSING_LINE_GUIDE +
+        "\n\nEXAMPLE OUTPUT:\n"
+        "5 PLAYERS WHO WILL DECIDE WC 2026:\n\n"
+        "1. Mbappé (France) — 12 World Cup goals at 27. Has never gone beyond the quarters with a trophy.\n"
+        "2. Vinicius Jr (Brazil) — 3 UCL finals in 4 years. This is his statement tournament.\n"
+        "3. Bellingham (England) — Scored the winner in every knockout game of WC 2022 qualifiers.\n"
+        "4. Messi (Argentina) — Defending champion. This is the last one. Every minute counts.\n"
+        "5. Lamine Yamal (Spain) — 17 years old. Starting for the tournament favourites. No ceiling.\n\n"
+        "RT if your pick isn't on this list.\n\n"
         "Max 4000 chars."
     ),
+
     "reply": (
         "TASK — REPLY\n"
         "Add one fact or stat the original tweet missed. One sentence. Direct. No CTA. Max 180 chars."
@@ -277,6 +352,19 @@ def _item_key(item: dict) -> str:
     return hashlib.md5(raw.encode()).hexdigest()
 
 
+def _item_is_fresh(item: dict, cutoff: datetime) -> bool:
+    """True if the item was collected after cutoff, OR if it's breaking (always keep)."""
+    if item.get("is_breaking", False):
+        return True
+    try:
+        ts = datetime.fromisoformat(item.get("collected_at", "2000-01-01T00:00:00+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts > cutoff
+    except Exception:
+        return True  # keep items we can't parse rather than silently drop them
+
+
 def _score_item(item: dict) -> int:
     text  = (item.get("title", "") + " " + item.get("summary", "")).lower()
     score = sum(w for kw, w in WC_KEYWORDS.items() if kw in text)
@@ -300,6 +388,63 @@ def _mark_posted() -> None:
     _save_json(STATE_FILE, state)
 
 
+def _get_daily_count() -> int:
+    state = _load_json(STATE_FILE, {})
+    today = datetime.now(timezone.utc).date().isoformat()
+    return state.get("daily_posts", {}).get(today, 0)
+
+
+def _increment_daily_count(n: int = 1) -> int:
+    state = _load_json(STATE_FILE, {})
+    today  = datetime.now(timezone.utc).date().isoformat()
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=7)).isoformat()
+    daily  = {k: v for k, v in state.get("daily_posts", {}).items() if k >= cutoff}
+    daily[today] = daily.get(today, 0) + n
+    state["daily_posts"] = daily
+    _save_json(STATE_FILE, state)
+    return daily[today]
+
+
+def _get_mode_count(mode: str) -> int:
+    state     = _load_json(STATE_FILE, {})
+    today_str = datetime.now(ET).date().isoformat()
+    return state.get("daily_mode_counts", {}).get(today_str, {}).get(mode, 0)
+
+
+def _increment_mode_count(mode: str) -> None:
+    state     = _load_json(STATE_FILE, {})
+    today_str = datetime.now(ET).date().isoformat()
+    counts    = state.setdefault("daily_mode_counts", {}).setdefault(today_str, {})
+    counts[mode] = counts.get(mode, 0) + 1
+    _save_json(STATE_FILE, state)
+
+
+def _fixture_to_item(fixture: dict, mode: str) -> dict:
+    """Synthesise a queue item from fixture data for scheduled matchday/stat posts."""
+    home    = fixture["home"]
+    away    = fixture["away"]
+    group   = fixture.get("group", "?")
+    kickoff = fixture.get("kickoff_et", "TBD")
+    venue   = fixture.get("venue", "")
+    city    = fixture.get("city", "")
+    md      = fixture.get("matchday", 1)
+    venue_str = f"{venue}, {city}" if venue and city else city or venue
+    return {
+        "title":        f"{home} vs {away} — WC 2026 Group {group} MD{md}, {kickoff} ET",
+        "summary":      (
+            f"Kickoff: {kickoff} ET. Venue: {venue_str}. "
+            f"Group {group}, Matchday {md}. "
+            f"Teams: {home} and {away}."
+        ),
+        "source":       "wc_schedule",
+        "score":        8,
+        "key":          f"sched_{fixture.get('date', '')}_{home}_{away}_{mode}",
+        "collected_at": datetime.now(timezone.utc).isoformat(),
+        "is_breaking":  False,
+        "url":          "",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Generation — uses /generate/from-source to ground output in actual news
 # ---------------------------------------------------------------------------
@@ -311,23 +456,28 @@ def _load_intelligence() -> dict:
 def _select_mode(item: dict, is_breaking: bool, post_index: int) -> str:
     """
     Choose content mode. List/ranking articles always get 'list' mode.
-    Breaking news always gets 'news'. Otherwise use learned performance weights.
+    Breaking news always gets 'news'. On match days, first post of a run
+    gets 'matchday' ~50% of the time. Otherwise use learned performance weights.
     """
     if is_breaking:
         return "news"
 
-    # Detect list/ranking articles — give them a richer long-form treatment
     if _LIST_TITLE_RE.search(item.get("title", "")):
         return "list"
+
+    # On match days, give the first post of each run a coin-flip chance to be a matchday preview
+    if post_index == 0 and fixture_count_today() >= 2 and random.random() < 0.5:
+        return "matchday"
 
     intel = _load_intelligence()
     mode_perf: dict = intel.get("mode_performance", {})
 
     if mode_perf:
+        # Exclude modes not in POST_MODES from learned weights
         weights = [max(mode_perf.get(m, 1.0), 0.1) for m in POST_MODES]
         return random.choices(POST_MODES, weights=weights, k=1)[0]
 
-    return POST_MODES[post_index % len(POST_MODES)]
+    return random.choices(POST_MODES, weights=POST_MODE_DEFAULT_WEIGHTS, k=1)[0]
 
 
 async def _generate_post(item: dict, mode: str = "news") -> str | None:
@@ -336,6 +486,10 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
     angle       = random.choice(ANGLES)
     instruction = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["news"])
     char_limit  = MODE_CHAR_LIMITS.get(mode, 280)
+
+    # Today's WC fixture context — injected so model can write "tonight" naturally
+    fixture_ctx = get_fixture_context_block()
+    fixture_block = f"\n{fixture_ctx}\n" if fixture_ctx else ""
 
     # Inject learned intelligence
     intel       = _load_intelligence()
@@ -359,19 +513,20 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
     source_text = (
         f"HEADLINE: {item['title']}\n"
         f"SOURCE: {item.get('source', 'unknown')} (do NOT mention this outlet in the post)\n"
-        f"DATE COLLECTED: ~{pub_approx}  |  TODAY: {today}\n\n"
+        f"DATE COLLECTED: ~{pub_approx}  |  TODAY: {today}\n"
+        f"{fixture_block}\n"
         f"ARTICLE CONTENT:\n{item.get('summary', '(no body — use headline only)')}\n\n"
         f"---\n"
         f"SECONDARY ANGLE: {angle}\n\n"
         f"{instruction}"
         f"{learned_block}\n\n"
         f"HARD RULES:\n"
-        f"- Only state facts from ARTICLE CONTENT. Do NOT add context from training data.\n"
+        f"- Only state facts from ARTICLE CONTENT or TODAY'S WC 2026 FIXTURES. Do NOT invent stats.\n"
         f"- NEVER mention any media outlet, website, or publication name.\n"
-        f"- Be specific — name a player, club, country, stadium, number, or event. Never be vague ('a key player', 'some teams', 'certain matches').\n"
-        f"- Never say 'today', 'yesterday', 'this morning' unless ARTICLE CONTENT says so.\n"
+        f"- Be specific — name a player, country, stadium, number, or fixture. Never be vague.\n"
+        f"- If a team in the article has a fixture in TODAY'S WC 2026 FIXTURES, reference it ('tonight', '[city]', '[time] ET').\n"
         f"- Do not start with 'I'.\n"
-        f"- The post must NEVER end with a question mark. The CTA is always a statement or directive.\n"
+        f"- At most ONE question mark in the entire post. Never more than one.\n"
         f"- BANNED PHRASES (never use these): {BANNED_PHRASES}"
     )
 
@@ -477,8 +632,17 @@ async def collect_job() -> None:
         })
         added += 1
 
+    # Purge stale items — when fresh context arrives, old items become irrelevant
+    if added > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=QUEUE_MAX_AGE_HOURS)
+        before_purge = len(queue)
+        queue = [item for item in queue if _item_is_fresh(item, cutoff)]
+        purged = before_purge - len(queue)
+        if purged:
+            log.info(f"[collect] Purged {purged} stale items (>{QUEUE_MAX_AGE_HOURS:.0f}h old)")
+
     queue.sort(key=lambda x: (x.get("is_breaking", False), x.get("score", 0)), reverse=True)
-    queue = queue[:300]
+    queue = queue[:200]
     _save_json(QUEUE_FILE, queue)
 
     log.info(
@@ -487,21 +651,23 @@ async def collect_job() -> None:
         f"breaking: {has_breaking} | queue: {len(queue)}"
     )
 
-    # --- Decide whether to post now ---
+    # --- Startup grace period: crawl and build context, don't post yet ---
+    elapsed_mins = (datetime.now(timezone.utc) - _AGENT_START_TIME).total_seconds() / 60
+    if elapsed_mins < STARTUP_GRACE_MINS:
+        log.info(
+            f"[collect] Startup grace ({elapsed_mins:.0f}/{STARTUP_GRACE_MINS:.0f}min) — "
+            f"crawling only, first post after {STARTUP_GRACE_MINS - elapsed_mins:.0f}min"
+        )
+        return
+
+    # --- Breaking news bypasses the schedule and posts immediately ---
     gap = _minutes_since_last_post()
 
     if has_breaking:
-        # Breaking news overrides the gap entirely
         log.info(f"[collect] BREAKING NEWS detected — posting immediately (gap was {gap:.0f}min)")
         await post_job()
-    elif added >= effective_threshold:
-        if gap >= effective_gap:
-            log.info(f"[collect] {added} new items + gap OK ({gap:.0f}min) — posting now")
-            await post_job()
-        else:
-            log.info(f"[collect] {added} new items but gap too short ({gap:.0f}/{effective_gap}min) — holding")
     else:
-        log.info(f"[collect] Only {added} new items (threshold={effective_threshold}) — no post triggered")
+        log.info(f"[collect] {added} new items queued (next scheduled slot will pick them up)")
 
 
 # ---------------------------------------------------------------------------
@@ -510,6 +676,14 @@ async def collect_job() -> None:
 
 async def post_job() -> None:
     log.info("[poster] Starting post run…")
+
+    daily_count = _get_daily_count()
+    if daily_count >= DAILY_POST_MAX:
+        log.info(f"[poster] Daily cap reached ({daily_count}/{DAILY_POST_MAX}) — skipping")
+        return
+
+    posts_this_run = min(POSTS_PER_RUN, DAILY_POST_MAX - daily_count)
+
     queue: list[dict] = _load_json(QUEUE_FILE, [])
     seen: list        = _load_json(SEEN_FILE, [])
     seen_set          = set(seen)
@@ -519,11 +693,13 @@ async def post_job() -> None:
         log.info("[poster] Queue empty — skipping")
         return
 
+    log.info(f"[poster] Daily: {daily_count}/{DAILY_POST_MAX} posted today. This run: up to {posts_this_run}.")
+
     posted    = 0
     used_keys: list[str] = []
 
     for i, item in enumerate(queue):
-        if posted >= POSTS_PER_RUN:
+        if posted >= posts_this_run:
             break
 
         mode = _select_mode(item=item, is_breaking=item.get("is_breaking", False), post_index=posted)
@@ -554,20 +730,49 @@ async def post_job() -> None:
                 log.warning("[poster] Empty generation — skipping")
                 continue
 
+            # Generate a contextual image for this post
+            image_path = None
+            try:
+                image_path = await generate_post_image(
+                    item=item,
+                    mode=mode,
+                    post_text=text,
+                    today_fixtures=get_todays_fixtures(),
+                )
+            except Exception as img_err:
+                log.warning(f"[poster] Image generation failed (posting without): {img_err}")
+
+            media_id: str | None = None
+            if image_path and not DRY_RUN:
+                media_id = upload_media(str(image_path))
+
             if DRY_RUN:
                 fake_id = f"dry_{int(datetime.now(timezone.utc).timestamp())}"
-                log.info(f"[poster] [DRY RUN] [{mode}] ({len(text)} chars)\n{text}\n{'─'*60}")
+                log.info(
+                    f"[poster] [DRY RUN] [{mode}] ({len(text)} chars)"
+                    f"{' +image' if image_path else ''}\n{text}\n{'─'*60}"
+                )
                 posted_id = fake_id
             else:
-                posted_id = post_tweet(text, reply_to_id=tweet_id_to_reply)
-                log.info(f"[poster] Posted {posted_id} [{mode}] ({len(text)} chars)\n{text}\n{'─'*60}")
+                posted_id = post_tweet(text, reply_to_id=tweet_id_to_reply, media_id=media_id)
+                log.info(
+                    f"[poster] Posted {posted_id} [{mode}] ({len(text)} chars)"
+                    f"{' +image' if media_id else ''}\n{text}\n{'─'*60}"
+                )
+
+            # Clean up temp image file after upload
+            if image_path:
+                try:
+                    image_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
             seen_set.add(item["key"])
             used_keys.append(item["key"])
             posted += 1
 
             # Pace posts — don't blast all N at once; wait between each (skip after last)
-            if posted < POSTS_PER_RUN and POST_INTERVAL_SECS > 0:
+            if posted < posts_this_run and POST_INTERVAL_SECS > 0:
                 log.info(f"[poster] Waiting {POST_INTERVAL_SECS}s before next post…")
                 await asyncio.sleep(POST_INTERVAL_SECS)
 
@@ -597,12 +802,149 @@ async def post_job() -> None:
 
     if posted:
         _mark_posted()
-
-    log.info(f"[poster] Done — {posted}/{POSTS_PER_RUN} posted | queue remaining: {len(queue)}")
+        new_daily = _increment_daily_count(posted)
+        log.info(
+            f"[poster] Done — {posted}/{posts_this_run} posted this run | "
+            f"daily total: {new_daily}/{DAILY_POST_MAX} | queue remaining: {len(queue)}"
+        )
 
 
 # ---------------------------------------------------------------------------
-# Job 3 — Performance tracker (runs every 6h)
+# Job 3 — Scheduled post (fires at pre-calculated fixture-aware times)
+# ---------------------------------------------------------------------------
+
+async def scheduled_post_job(mode: str, fixture: dict | None, label: str) -> None:
+    """Execute a single scheduled post slot with full mode + daily cap enforcement."""
+    log.info(f"[schedule] Slot fired: {label}")
+
+    # Daily total cap
+    daily_count = _get_daily_count()
+    if daily_count >= DAILY_POST_MAX:
+        log.info(f"[schedule] Daily cap ({DAILY_POST_MAX}) reached — skipping [{label}]")
+        return
+
+    # Per-mode cap
+    mode_count = _get_mode_count(mode)
+    mode_cap   = MODE_DAILY_CAPS.get(mode, 1)
+    if mode_count >= mode_cap:
+        log.info(f"[schedule] Mode cap for '{mode}' ({mode_cap}) reached — skipping [{label}]")
+        return
+
+    # Build or pick a queue item
+    if fixture and mode in ("matchday", "stat"):
+        item = _fixture_to_item(fixture, mode)
+    else:
+        queue: list[dict] = _load_json(QUEUE_FILE, [])
+        if not queue:
+            log.info(f"[schedule] Queue empty — skipping [{label}]")
+            return
+        # Pick the highest-scoring item not yet seen
+        seen_set = set(_load_json(SEEN_FILE, []))
+        candidates = [q for q in queue if q["key"] not in seen_set]
+        if not candidates:
+            log.info(f"[schedule] No unseen queue items — skipping [{label}]")
+            return
+        item = max(candidates, key=lambda x: x.get("score", 0))
+
+    text = await _generate_post(item, mode=mode)
+    if not text:
+        log.warning(f"[schedule] Empty generation — skipping [{label}]")
+        return
+
+    # Image
+    image_path = None
+    try:
+        image_path = await generate_post_image(
+            item=item, mode=mode, post_text=text, today_fixtures=get_todays_fixtures()
+        )
+    except Exception as img_err:
+        log.warning(f"[schedule] Image gen failed (posting without): {img_err}")
+
+    media_id: str | None = None
+    if image_path and not DRY_RUN:
+        media_id = upload_media(str(image_path))
+
+    if DRY_RUN:
+        posted_id = f"dry_{int(datetime.now(timezone.utc).timestamp())}"
+        log.info(
+            f"[schedule] [DRY RUN] [{mode}]{' +image' if image_path else ''}\n"
+            f"{text}\n{'─'*60}"
+        )
+    else:
+        posted_id = post_tweet(text, media_id=media_id)
+        log.info(
+            f"[schedule] Posted {posted_id} [{mode}]{' +image' if media_id else ''}\n"
+            f"{text}\n{'─'*60}"
+        )
+
+    if image_path:
+        try:
+            image_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    # Update state
+    _mark_posted()
+    _increment_daily_count(1)
+    _increment_mode_count(mode)
+
+    # Mark item as seen (for queue-based modes)
+    if mode not in ("matchday", "stat") or not fixture:
+        seen: list = _load_json(SEEN_FILE, [])
+        seen_set = set(seen)
+        seen_set.add(item["key"])
+        _save_json(SEEN_FILE, list(seen_set)[-5000:])
+
+    # Track for performance review
+    perf: list = _load_json(PERF_FILE, [])
+    perf.append({
+        "tweet_id":    posted_id,
+        "mode":        mode,
+        "text":        text,
+        "is_reply":    False,
+        "is_breaking": item.get("is_breaking", False),
+        "score":       item.get("score", 0),
+        "title":       item["title"][:120],
+        "source":      item.get("source", ""),
+        "posted_at":   datetime.now(timezone.utc).isoformat(),
+        "metrics":     None,
+    })
+    _save_json(PERF_FILE, perf[-200:])
+
+
+async def schedule_today() -> None:
+    """
+    Build today's fixture-aware post schedule and register APScheduler date jobs.
+    Safe to call multiple times — clears previous slot jobs first.
+    """
+    # Clear any existing slot jobs from a previous schedule build
+    for job in scheduler.get_jobs():
+        if job.id.startswith("slot_"):
+            job.remove()
+
+    fixtures = get_todays_fixtures()
+    if not fixtures:
+        log.info("[schedule] No fixtures today — no scheduled slots added")
+        return
+
+    slots = build_daily_schedule(fixtures)
+    log.info(f"[schedule] Today's post schedule ({len(slots)} slots):\n{describe_schedule(slots)}")
+
+    for i, slot in enumerate(slots):
+        job_id = f"slot_{slot.mode}_{i}"
+        scheduler.add_job(
+            scheduled_post_job,
+            trigger="date",
+            run_date=slot.run_at,
+            kwargs={"mode": slot.mode, "fixture": slot.fixture, "label": slot.label},
+            id=job_id,
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Job 4 — Performance tracker (runs every 6h)
 # ---------------------------------------------------------------------------
 
 async def check_performance() -> None:
@@ -741,13 +1083,28 @@ async def main() -> None:
         f"collect={initial_collect_mins}min | "
         f"threshold={MIN_QUEUE_THRESHOLD} items | gap={MIN_POST_GAP_MINS}min | "
         f"breaking_score≥{BREAKING_SCORE} | posts_per_run={POSTS_PER_RUN} | "
+        f"daily_cap={DAILY_POST_MAX} | "
         f"replies={'on' if ENABLE_REPLIES else 'off'} | dry_run={DRY_RUN}"
     )
     if not PERSONA_ID:
         log.warning("PERSONA_ID not set — run setup.py first")
 
+    # Fetch live WC schedule from API Football (falls back to bundled static file if no key)
+    await ensure_schedule_fresh()
+
     scheduler = AsyncIOScheduler(timezone="UTC")
 
+    # Refresh WC fixture cache every 12h
+    scheduler.add_job(
+        ensure_schedule_fresh,
+        trigger="interval",
+        hours=12,
+        id="schedule_refresh",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # Content collector — runs every N minutes, triggers post_job only on breaking news
     scheduler.add_job(
         collect_job,
         trigger="interval",
@@ -759,17 +1116,16 @@ async def main() -> None:
         misfire_grace_time=300,
     )
 
+    # Rebuild daily post schedule every midnight ET (picks up next day's fixtures)
     scheduler.add_job(
-        post_job,
-        trigger="interval",
-        hours=FALLBACK_POST_HOURS,
-        next_run_time=datetime.now(timezone.utc) + timedelta(hours=FALLBACK_POST_HOURS),
-        id="poster_fallback",
+        schedule_today,
+        trigger=CronTrigger(hour=0, minute=2, timezone=ET),
+        id="schedule_rebuild",
         max_instances=1,
         coalesce=True,
-        misfire_grace_time=600,
     )
 
+    # Performance metrics check — 6h after posts go out
     scheduler.add_job(
         check_performance,
         trigger="interval",
@@ -782,7 +1138,14 @@ async def main() -> None:
     )
 
     scheduler.start()
-    log.info(f"Collector fires now. Fallback poster in {FALLBACK_POST_HOURS}h. Perf check in 6h.")
+
+    # Build today's schedule AFTER scheduler starts (schedule_today adds jobs to it)
+    await schedule_today()
+
+    log.info(
+        f"Beteye running | collect={initial_collect_mins}min | "
+        f"daily_cap={DAILY_POST_MAX} | schedule built | perf_check in 6h"
+    )
 
     try:
         await asyncio.Event().wait()

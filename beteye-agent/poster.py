@@ -6,6 +6,7 @@ import tweepy
 log = logging.getLogger("beteye.poster")
 
 _client: tweepy.Client | None = None
+_v1_api: tweepy.API | None = None
 
 
 def _get_client() -> tweepy.Client:
@@ -20,11 +21,42 @@ def _get_client() -> tweepy.Client:
     return _client
 
 
-def post_tweet(text: str, reply_to_id: str | None = None) -> str:
-    """Post a tweet and return the tweet ID. Optionally post as a reply."""
+def _get_v1_api() -> tweepy.API:
+    """Tweepy v1.1 API — required for media upload (not available in v2 Client)."""
+    global _v1_api
+    if _v1_api is None:
+        auth = tweepy.OAuth1UserHandler(
+            os.environ["X_API_KEY"],
+            os.environ["X_API_SECRET"],
+            os.environ["X_ACCESS_TOKEN"],
+            os.environ["X_ACCESS_TOKEN_SECRET"],
+        )
+        _v1_api = tweepy.API(auth)
+    return _v1_api
+
+
+def upload_media(image_path: str) -> str | None:
+    """
+    Upload an image to X/Twitter and return the media_id string.
+    Uses v1.1 API (chunked upload for images up to 5MB).
+    Returns None on failure — post will go out without image.
+    """
+    try:
+        media = _get_v1_api().media_upload(filename=image_path)
+        log.info(f"[poster] Media uploaded: {media.media_id}")
+        return str(media.media_id)
+    except Exception as e:
+        log.warning(f"[poster] Media upload failed: {e}")
+        return None
+
+
+def post_tweet(text: str, reply_to_id: str | None = None, media_id: str | None = None) -> str:
+    """Post a tweet and return the tweet ID."""
     kwargs: dict = {"text": text[:4000]}  # X Premium Basic limit
     if reply_to_id:
         kwargs["reply"] = {"in_reply_to_tweet_id": reply_to_id}
+    if media_id:
+        kwargs["media"] = {"media_ids": [media_id]}
     response = _get_client().create_tweet(**kwargs)
     return str(response.data["id"])
 

@@ -26,6 +26,13 @@ NEWS_FEEDS: list[str] = [
     "https://www.uefa.com/rssfeed/news/",                        # UEFA (WC qualifying)
 ]
 
+# Reddit — fan sentiment, match reactions, trending WC discussions (public RSS, no key needed)
+REDDIT_FEEDS: list[str] = [
+    "https://www.reddit.com/r/worldcup/.rss?limit=15",          # WC-specific fan discussion
+    "https://www.reddit.com/r/soccer/.rss?limit=15",            # General football sentiment
+    "https://www.reddit.com/r/ussoccer/.rss?limit=10",          # USMNT fan sentiment
+]
+
 # YouTube — only analysis/news channels; avoid channels that post historical throwbacks
 # FIFA Official (UCpcTrCXblq78GZrTUTLWeBw) deliberately excluded — mostly classic clips
 YOUTUBE_CHANNEL_IDS: list[str] = [
@@ -340,17 +347,21 @@ async def get_all_items() -> list[dict]:
     """Fetch and deduplicate items from all sources."""
     tasks = (
         [_async_parse(url) for url in NEWS_FEEDS]
+        + [_async_parse(url, max_age_hours=NITTER_MAX_AGE_HOURS, max_items=MAX_ITEMS_NITTER)
+           for url in REDDIT_FEEDS]
         + [_fetch_youtube_channel(cid) for cid in YOUTUBE_CHANNEL_IDS]
         + [_fetch_nitter(h) for h in TRACKED_X_ACCOUNTS]
     )
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen_urls: set[str] = set()
-    news_items: list[dict] = []
-    yt_items:   list[dict] = []
-    x_items:    list[dict] = []
-    n_feeds = len(NEWS_FEEDS)
-    n_yt    = len(YOUTUBE_CHANNEL_IDS)
+    news_items:     list[dict] = []
+    reddit_items:   list[dict] = []
+    yt_items:       list[dict] = []
+    x_items:        list[dict] = []
+    n_feeds   = len(NEWS_FEEDS)
+    n_reddit  = len(REDDIT_FEEDS)
+    n_yt      = len(YOUTUBE_CHANNEL_IDS)
 
     for idx, r in enumerate(results):
         if not isinstance(r, list):
@@ -362,7 +373,11 @@ async def get_all_items() -> list[dict]:
             seen_urls.add(url)
             if idx < n_feeds:
                 news_items.append(item)
-            elif idx < n_feeds + n_yt:
+            elif idx < n_feeds + n_reddit:
+                item["source_type"] = "reddit"
+                item["source_bonus"] = 1
+                reddit_items.append(item)
+            elif idx < n_feeds + n_reddit + n_yt:
                 yt_items.append(item)
             else:
                 x_items.append(item)
@@ -378,12 +393,13 @@ async def get_all_items() -> list[dict]:
         enriched_map = {i["url"]: i for i in enriched if isinstance(i, dict)}
         news_items = [enriched_map.get(i["url"], i) for i in news_items]
 
-    items = news_items + yt_items + x_items
+    items = news_items + reddit_items + yt_items + x_items
     art = sum(1 for i in news_items if i.get("has_article_body"))
     yt  = sum(1 for i in yt_items  if i.get("has_transcript"))
     log.info(
         f"Fetched {len(items)} unique items — "
         f"news RSS: {len(news_items)} ({art} with article body) | "
+        f"Reddit: {len(reddit_items)} | "
         f"YouTube: {len(yt_items)} ({yt} with transcripts) | "
         f"X accounts: {len(x_items)}"
     )
