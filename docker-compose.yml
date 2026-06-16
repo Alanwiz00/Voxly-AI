@@ -148,7 +148,7 @@ services:
       # DAILY_POST_MAX   — hard ceiling across all modes (default 15)
       # BREAKING_SCORE   — score threshold that bypasses the schedule (default 6)
       # STARTUP_GRACE    — minutes after start where collect_job is read-only (default 30)
-      - DAILY_POST_MAX=${BETEYE_DAILY_POST_MAX:-15}
+      - DAILY_POST_MAX=${BETEYE_DAILY_POST_MAX:-20}
       - BREAKING_SCORE_THRESHOLD=${BETEYE_BREAKING_SCORE_THRESHOLD:-6}
       - STARTUP_GRACE_MINS=${BETEYE_STARTUP_GRACE_MINS:-30}
 
