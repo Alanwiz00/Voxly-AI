@@ -208,7 +208,7 @@ MODE_INSTRUCTIONS = {
     "take": (
         "TASK — POST-MATCH SHARP TAKE\n"
         "Write a reaction post about the FEATURED FIXTURE — that match only.\n\n"
-        "⚠ FORMAT — NON-NEGOTIABLE: Every sentence on its own line. No prose paragraphs.\n\n"
+        "⚠ FORMAT — NON-NEGOTIABLE: Every sentence on its own line, separated by a blank line. No prose paragraphs.\n\n"
         "STRUCTURE:\n"
         "  Line 1: Open — calm, knowing. Something that feels like you saw it coming.\n"
         "           Don't recycle 'No shock. No noise.' — be specific to what actually happened.\n"
@@ -241,41 +241,40 @@ MODE_INSTRUCTIONS = {
     "matchday": (
         "TASK — PRE-MATCH HYPE (ONE GAME ONLY)\n"
         "Write about EXACTLY the fixture in HEADLINE. One match. Nothing else.\n\n"
-        "⚠ FORMAT — THIS IS NON-NEGOTIABLE:\n"
-        "Output MUST be structured as individual lines separated by newline characters.\n"
-        "Every sentence lives on its own line. Do NOT write prose paragraphs.\n"
-        "Structure (7 lines max):\n"
-        "  Line 1: Hook — sharp fact, record, or rivalry specific to THIS match\n"
-        "  Line 2: (optional) second hook line if it adds weight\n"
-        "  Line 3: Bare facts — [TIME] ET · [STADIUM] · [CITY] · Group [X]\n"
-        "  Line 4: The duel — one player vs one player, or one number that defines this\n"
-        "  Line 5: BetEye organic angle — NOT the stock phrase. Write something specific to THIS game.\n"
-        "           Tie it to the narrative. End with @BetEye_ 👁 naturally.\n"
-        "           Examples of organic angles:\n"
+        "⚠ FORMAT — NON-NEGOTIABLE. Every line on its own, separated by a blank line. No prose paragraphs.\n"
+        "Structure (6–7 lines):\n"
+        "  Line 1: Match title — HOME VS AWAY in ALL CAPS (e.g. 'JORDAN VS AUSTRIA')\n"
+        "  Line 2: Kickoff facts — [TIME] ET · [STADIUM] · [CITY] · Group [X].\n"
+        "           If stadium/city are unknown, write ONLY '[TIME] ET · Group [X].'\n"
+        "           Never write 'Unrevealed', 'Unknown', or placeholder text.\n"
+        "  Line 3: Hook — sharp fact, record, or rivalry specific to THIS match\n"
+        "  Line 4: (optional) second hook if it adds weight\n"
+        "  Line 5: The duel — one player vs one player, or one stat that defines this game\n"
+        "  Line 6: BetEye organic angle — its own line, NOT attached to the previous sentence.\n"
+        "           NOT the stock phrase. Write something specific to THIS game. End with @BetEye_ 👁\n"
+        "           Examples:\n"
         "             'The data on Messi in tournament openers tells a specific story. @BetEye_ 👁'\n"
-        "             'Algeria have beaten heavier favourites before. @BetEye_ already mapped the risk.👁'\n"
         "             'Whoever wins the midfield battle wins this. @BetEye_ sees exactly where it breaks.👁'\n"
-        "  Line 6: Closing directive — short, punchy. No question mark.\n\n"
+        "  Line 7: Closing directive — short, punchy. No question mark.\n\n"
         "RULES:\n"
         "- ONE match only. Never reference another game.\n"
-        "- Use time and venue from FEATURED FIXTURE.\n"
         "- Real names, real numbers, real history. Nothing invented.\n"
         "- Max ONE question mark total.\n"
-        "- Max 400 chars total.\n\n"
-        "EXAMPLE OUTPUT (each line is a real Twitter line break):\n"
+        "- Max 420 chars total.\n\n"
+        "EXAMPLE OUTPUT:\n"
+        "FRANCE VS SENEGAL\n"
+        "3PM ET · MetLife Stadium · East Rutherford · Group I.\n"
         "France haven't lost a WC group stage game in 12 years.\n"
         "Senegal ended that streak once. 2002. They remember.\n"
-        "3PM ET · MetLife Stadium · East Rutherford · Group I.\n"
         "Mbappé vs Mendy. Two men who know each other too well.\n"
-        "Sadio played in this era. The data knows who carries the weight. @BetEye_ 👁\n"
-        "Don't sleep on this one.\n\n"
-        "Max 400 chars."
+        "The data knows who carries the weight. @BetEye_ 👁\n"
+        "Don't sleep on this one."
     ),
 
     "news": (
         "TASK — WC 2026 INTELLIGENCE UPDATE\n"
         "Report what happened — sharp, specific, no outlet names.\n\n"
-        "⚠ FORMAT — NON-NEGOTIABLE: Every sentence on its own line. No prose paragraphs.\n\n"
+        "⚠ FORMAT — NON-NEGOTIABLE: Every sentence on its own line, separated by a blank line. No prose paragraphs.\n\n"
         "STRUCTURE:\n"
         "  Line 1: The fact. One line. Names, numbers, stakes. Nothing soft.\n"
         "  Line 2-3: Why it changes something — what it means for the tournament.\n"
@@ -452,14 +451,18 @@ def _fixture_to_item(fixture: dict, mode: str) -> dict:
     away      = fixture["away"]
     group     = fixture.get("group", "?")
     kickoff   = fixture.get("kickoff_et", "TBD")
-    venue     = fixture.get("venue", "")
-    city      = fixture.get("city", "")
+    _PLACEHOLDER = {"unrevealed", "unknown", "tbd", "tba", "n/a", ""}
+    raw_venue = (fixture.get("venue", "") or "").strip()
+    raw_city  = (fixture.get("city",  "") or "").strip()
+    venue     = "" if raw_venue.lower() in _PLACEHOLDER else raw_venue
+    city      = "" if raw_city.lower()  in _PLACEHOLDER else raw_city
     md        = fixture.get("matchday", 1)
     venue_str = f"{venue}, {city}" if venue and city else city or venue
+    location  = f"Venue: {venue_str}. " if venue_str else ""
     return {
         "title":        f"{home} vs {away} — WC 2026 Group {group} MD{md}, {kickoff} ET",
         "summary":      (
-            f"Kickoff: {kickoff} ET. Venue: {venue_str}. "
+            f"Kickoff: {kickoff} ET. {location}"
             f"Group {group}, Matchday {md}. "
             f"Teams: {home} and {away}."
         ),
@@ -587,12 +590,26 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
             return None
         text = results[0]["content"].strip()
 
-    # For line-structured modes: if the API collapsed newlines into a single block,
-    # reinsert line breaks after sentence-ending punctuation.
-    if mode in ("matchday", "take", "stat", "news") and "\n" not in text:
-        import re
-        # Insert \n after ". ", "! ", "? " when followed by a capital letter or emoji
+    import re
+
+    # Step 1: if the model collapsed everything into one block, restore line breaks
+    # at sentence boundaries (capital letter or emoji after ". / ! / ?")
+    if "\n" not in text:
         text = re.sub(r'([.!?])\s+(?=[A-Z\U0001F300-\U0001FAFF])', r'\1\n', text)
+
+    # Step 2: normalise to blank-line-separated lines for ALL post types.
+    # Collapse any existing blank lines → single blank, then ensure every
+    # non-empty line is followed by a blank line.
+    lines = [l.rstrip() for l in text.splitlines()]
+    merged: list[str] = []
+    for line in lines:
+        if line:
+            merged.append(line)
+            merged.append("")           # blank line after every content line
+        # skip already-blank lines — we're adding our own
+
+    # Strip leading/trailing blank lines then rejoin
+    text = "\n".join(merged).strip()
 
     return text[:char_limit]
 

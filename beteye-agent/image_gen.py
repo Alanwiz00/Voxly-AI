@@ -366,32 +366,53 @@ async def _team_logo_rect(url: str, w: int = 300, h: int = 200, radius: int = 14
 # Handles 1 fixture (full detail) or 2–5 fixtures (compact multi-game list)
 # ---------------------------------------------------------------------------
 
-async def match_card(fixtures: list[dict]) -> Path:
+async def match_card(fixtures: list[dict], result: dict | None = None) -> Path:
     if len(fixtures) == 1:
-        return await _single_match(fixtures[0])
+        return await _single_match(fixtures[0], result=result)
     return await _multi_match(fixtures)
 
 
-async def _single_match(fx: dict) -> Path:
-    """Full-width single fixture preview with country flags."""
+async def _single_match(fx: dict, result: dict | None = None) -> Path:
+    """
+    Full-width single fixture card.
+    Pre-match: shows VS + kickoff time.
+    Live/post-match: shows bold scoreline when result is provided.
+    result = {"home_goals": int, "away_goals": int, "status": str, "elapsed": int|None}
+    """
     img, draw = _new_card()
 
     home_name = fx.get("home", "Home")
     away_name = fx.get("away", "Away")
 
-    # Background — split glow pulls the eye to each side then centre
+    has_score = result is not None and result.get("home_goals") is not None
+    is_ft     = result and result.get("status") in ("FT", "AET", "PEN")
+    is_live   = result and result.get("status") in ("1H", "HT", "2H", "ET", "P")
+
+    # Background glows
     _glow(img, 250,          330, 420, CYAN_MID, 0.11)
     _glow(img, CARD_W - 250, 330, 420, CYAN_MID, 0.11)
-    _glow(img, CARD_W // 2,  330, 200, CYAN,     0.08)
+    centre_glow = 0.22 if has_score else 0.08
+    _glow(img, CARD_W // 2, 330, 200, CYAN, centre_glow)
 
     # Top band
     draw.rectangle((0, 0, CARD_W, 70), fill=BLUE_DARK + (255,))
     label = (f"FIFA WORLD CUP 2026  ·  GROUP {fx.get('group', '?')}"
              f"  ·  MATCHDAY {fx.get('matchday', '?')}")
     _text_c(draw, label, 22, F["label"], (*CYAN_MID, 220))
+
+    # Status badge top-right
+    if is_ft:
+        draw.text((CARD_W - 24, 22), "FULL TIME", font=F["label"],
+                  fill=(*CYAN, 230), anchor="rt")
+    elif is_live:
+        elapsed = result.get("elapsed") or ""
+        badge   = f"LIVE  {elapsed}′" if elapsed else "LIVE"
+        draw.text((CARD_W - 24, 22), badge, font=F["label"],
+                  fill=(255, 80, 80, 240), anchor="rt")
+
     draw.line([(0, 70), (CARD_W, 70)], fill=(*CYAN, 160), width=2)
 
-    # Fetch flags (prefer TEAM_FLAGS lookup; fall back to any API logo)
+    # Flags
     flag_w, flag_h = 300, 200
     home_url = TEAM_FLAGS.get(home_name) or fx.get("home_logo", "")
     away_url = TEAM_FLAGS.get(away_name) or fx.get("away_logo", "")
@@ -400,14 +421,11 @@ async def _single_match(fx: dict) -> Path:
         _team_logo_rect(away_url, flag_w, flag_h),
     )
 
-    flag_cy   = 300
-    flag_y    = flag_cy - flag_h // 2
-    home_cx   = 235
-    away_cx   = CARD_W - 235
-    home_fx   = home_cx - flag_w // 2
-    away_fx   = away_cx - flag_w // 2
+    flag_cy = 300
+    flag_y  = flag_cy - flag_h // 2
+    home_cx = 235
+    away_cx = CARD_W - 235
 
-    # Subtle neon border glow behind each flag
     for cx in (home_cx, away_cx):
         _glow(img, cx, flag_cy, 170, CYAN, 0.14)
         draw.rounded_rectangle(
@@ -416,48 +434,77 @@ async def _single_match(fx: dict) -> Path:
             radius=16, outline=(*CYAN_MID, 100), width=2,
         )
 
-    for cx, name, flag_img, x in (
-        (home_cx, home_name, home_flag, home_fx),
-        (away_cx, away_name, away_flag, away_fx),
+    for cx, name, flag_img in (
+        (home_cx, home_name, home_flag),
+        (away_cx, away_name, away_flag),
     ):
+        x = cx - flag_w // 2
         if flag_img:
             img.alpha_composite(flag_img, (x, flag_y))
         else:
             fb = _initials_circle(name, flag_h)
             img.alpha_composite(fb, (cx - flag_h // 2, flag_y))
-
         draw.text((cx, flag_y + flag_h + 16), name.upper(),
                   font=F["sub"], fill=WHITE, anchor="mt")
 
-    # VS — centred, neon
-    _glow(img, CARD_W // 2, flag_cy, 110, CYAN, 0.30)
-    draw.text((CARD_W // 2, flag_cy - 58), "VS",
-              font=F["hero"], fill=CYAN, anchor="mt")
+    # Centre — scoreline or VS
+    cx = CARD_W // 2
+    if has_score:
+        hg = str(result["home_goals"])
+        ag = str(result["away_goals"])
+        score_y = flag_cy - 62
+        draw.text((cx - 24, score_y), hg, font=F["hero"], fill=WHITE, anchor="rt")
+        draw.text((cx,      score_y + 10), "—", font=F["big"], fill=CYAN, anchor="mt")
+        draw.text((cx + 24, score_y), ag, font=F["hero"], fill=WHITE, anchor="lt")
+
+        if is_ft:
+            pill_text = "FULL TIME"
+        elif result.get("status") == "HT":
+            pill_text = "HALF TIME"
+        else:
+            elapsed = result.get("elapsed", "")
+            pill_text = f"{elapsed}′  LIVE" if elapsed else "LIVE"
+
+        pill_w = 210
+        pill_x = cx - pill_w // 2
+        pill_y = score_y + 110
+        draw.rounded_rectangle((pill_x, pill_y, pill_x + pill_w, pill_y + 32),
+                                radius=8, fill=BLUE_DARK + (220,),
+                                outline=(*CYAN, 180), width=2)
+        _text_c(draw, pill_text, pill_y + 6, F["tiny"], (*CYAN, 230))
+    else:
+        _glow(img, cx, flag_cy, 110, CYAN, 0.30)
+        draw.text((cx, flag_cy - 58), "VS", font=F["hero"], fill=CYAN, anchor="mt")
 
     # ECG signature
     ecg_y = 465
     _ecg(draw, 60, CARD_W - 60, ecg_y, (*CYAN, 210), width=3)
 
-    # Kickoff / venue row
-    kickoff = fx.get("kickoff_et", "TBD")
-    city    = fx.get("city", "")
-    venue   = fx.get("venue", "")
-    info    = f"TODAY  ·  {kickoff} ET"
-    if city:
-        info += f"  ·  {city}"
-    _text_c(draw, info,  488, F["body"],  GREY)
-    if venue:
-        _text_c(draw, venue, 530, F["small"], GREY_DIM)
+    # Kickoff / venue row (only for pre-match)
+    if not has_score:
+        kickoff = fx.get("kickoff_et", "TBD")
+        city    = fx.get("city", "")
+        venue   = fx.get("venue", "")
+        info    = f"TODAY  ·  {kickoff} ET"
+        if city:
+            info += f"  ·  {city}"
+        _text_c(draw, info, 488, F["body"], GREY)
+        if venue:
+            _text_c(draw, venue, 522, F["small"], GREY_DIM)
 
-    # Bottom bar
-    draw.rectangle((0, 600, CARD_W, CARD_H), fill=BLUE_DARK + (255,))
-    draw.line([(0, 600), (CARD_W, 600)], fill=(*CYAN, 180), width=2)
-    _logo(img, w=190, x=40, y=610)
-    draw.text((CARD_W - 50, 630), "@beteye_  ·  #WC2026",
-              font=F["small"], fill=GREY_DIM, anchor="rt")
+    # Bottom bar — logo left, handle right, vertically centred in 75px band
+    bar_y     = 600
+    bar_mid   = bar_y + (CARD_H - bar_y) // 2   # = 637
+    logo_w    = 180
+    draw.rectangle((0, bar_y, CARD_W, CARD_H), fill=BLUE_DARK + (255,))
+    draw.line([(0, bar_y), (CARD_W, bar_y)], fill=(*CYAN, 180), width=2)
+    _logo(img, w=logo_w, x=40, y=bar_mid - 19)  # 19 ≈ half of ~38px logo height
+    draw.text((CARD_W - 48, bar_mid), "@beteye_  ·  #WC2026",
+              font=F["small"], fill=GREY_DIM, anchor="rm")
 
-    slug = f"{fx.get('home','?')}_{fx.get('away','?')}_{fx.get('date','')}".replace(" ", "_")
-    out  = TMP_DIR / f"match_{slug}.png"
+    slug   = f"{fx.get('home','?')}_{fx.get('away','?')}_{fx.get('date','')}".replace(" ", "_")
+    suffix = "_ft" if is_ft else ("_live" if is_live else "")
+    out    = TMP_DIR / f"match_{slug}{suffix}.png"
     img.convert("RGB").save(out, "PNG", optimize=True)
     return out
 
@@ -581,17 +628,67 @@ async def _take_card(fx: dict, result: dict | None = None) -> Path:
         _text_c(draw, meta, 476, F["small"], GREY_DIM)
 
     # Bottom bar
+    bar_mid = 600 + (CARD_H - 600) // 2
     draw.rectangle((0, 600, CARD_W, CARD_H), fill=BLUE_DARK + (255,))
     draw.line([(0, 600), (CARD_W, 600)], fill=(*CYAN, 180), width=2)
-    _logo(img, w=180, x=40, y=612)
-    draw.text((CARD_W - 50, 630), "@beteye_  ·  #WC2026",
-              font=F["small"], fill=GREY_DIM, anchor="rt")
+    _logo(img, w=180, x=40, y=bar_mid - 19)
+    draw.text((CARD_W - 48, bar_mid), "@beteye_  ·  #WC2026",
+              font=F["small"], fill=GREY_DIM, anchor="rm")
 
     slug   = f"{fx.get('home','?')}_{fx.get('away','?')}_{fx.get('date','')}".replace(" ", "_")
     suffix = "_ft" if is_ft else ("_live" if is_live else "_take")
     out    = TMP_DIR / f"take_{slug}{suffix}.png"
     img.convert("RGB").save(out, "PNG", optimize=True)
     return out
+
+
+async def _search_action_image(home: str, away: str, extra: str = "") -> Path | None:
+    """
+    Search DuckDuckGo for a real match/celebration photo.
+    Returns a local JPEG path on success, None on any failure.
+    Falls back gracefully so callers can render a card instead.
+    """
+    import re as _re
+    query = f"{home} {away} FIFA World Cup 2026 {extra}".strip()
+    try:
+        from duckduckgo_search import DDGS
+        with DDGS() as ddgs:
+            results = list(ddgs.images(query, max_results=8, type_image="photo"))
+    except Exception as e:
+        log.warning(f"[image] DDG search failed: {e}")
+        return None
+
+    if not results:
+        log.warning(f"[image] DDG returned 0 results for: {query!r}")
+        return None
+
+    async with httpx.AsyncClient(
+        timeout=12.0, follow_redirects=True,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; BetEye/1.0)"},
+    ) as client:
+        for r in results:
+            url = r.get("image", "")
+            if not url:
+                continue
+            try:
+                resp = await client.get(url)
+                if resp.status_code != 200:
+                    continue
+                if "image" not in resp.headers.get("content-type", ""):
+                    continue
+                raw = Image.open(io.BytesIO(resp.content)).convert("RGB")
+                if raw.width < 500 or raw.height < 350:
+                    continue
+                slug = _re.sub(r"[^a-z0-9]+", "_", query.lower())[:40]
+                out  = TMP_DIR / f"action_{slug}.jpg"
+                raw.save(out, "JPEG", quality=88, optimize=True)
+                log.info(f"[image] Action photo fetched ({raw.width}×{raw.height}): {url}")
+                return out
+            except Exception:
+                continue
+
+    log.warning(f"[image] No usable action photo found for: {query!r}")
+    return None
 
 
 async def _multi_match(fixtures: list[dict]) -> Path:
@@ -651,11 +748,12 @@ async def _multi_match(fixtures: list[dict]) -> Path:
     _ecg(draw, 60, CARD_W - 60, ecg_y, (*CYAN, 200), width=3)
 
     # Bottom bar
+    bar_mid = 600 + (CARD_H - 600) // 2
     draw.rectangle((0, 600, CARD_W, CARD_H), fill=BLUE_DARK + (255,))
     draw.line([(0, 600), (CARD_W, 600)], fill=(*CYAN, 180), width=2)
-    _logo(img, w=180, x=40, y=610)
-    draw.text((CARD_W - 50, 630), "@beteye_  ·  #WC2026",
-              font=F["small"], fill=GREY_DIM, anchor="rt")
+    _logo(img, w=180, x=40, y=bar_mid - 19)
+    draw.text((CARD_W - 48, bar_mid), "@beteye_  ·  #WC2026",
+              font=F["small"], fill=GREY_DIM, anchor="rm")
 
     out = TMP_DIR / f"multi_match_{int(datetime.now(timezone.utc).timestamp())}.png"
     img.convert("RGB").save(out, "PNG", optimize=True)
@@ -841,20 +939,22 @@ async def generate_post_image(
     so we generate a single-match card rather than a multi-game list.
     """
     try:
+        from wc_fixtures import fetch_fixture_result
+
         if mode == "matchday":
-            # Prefer the specific fixture attached to this scheduled post
             fx = item.get("_fixture")
             if fx:
-                return await match_card([fx])          # single-match card
+                result = await fetch_fixture_result(fx.get("fixture_id"))
+                return await match_card([fx], result=result)
             if today_fixtures:
-                return await match_card(today_fixtures[:1])  # fallback: first of today
+                return await match_card(today_fixtures[:1])
             return branded_card()
 
         if mode == "stat":
-            # Show the fixture card + stat overlay
             fx = item.get("_fixture")
             if fx:
-                return await match_card([fx])
+                result = await fetch_fixture_result(fx.get("fixture_id"))
+                return await match_card([fx], result=result)
             lines    = [l.strip() for l in post_text.split("\n") if l.strip()]
             headline = lines[0] if lines else item.get("title", "")[:80]
             context  = lines[1:4]
@@ -862,11 +962,14 @@ async def generate_post_image(
 
         if mode == "news":
             mood = "intense" if item.get("is_breaking") else "calm"
-            # If news is about a team with a fixture today, show their match card
+            # If news is about a team with a live/upcoming fixture today, show their match card
             if today_fixtures and _news_about_today(item, today_fixtures):
                 relevant = [f for f in today_fixtures
                             if _news_about_today(item, [f])]
-                return await match_card(relevant[:1])
+                if relevant:
+                    fx     = relevant[0]
+                    result = await fetch_fixture_result(fx.get("fixture_id"))
+                    return await match_card([fx], result=result)
             # Extract a short headline from title for card text (strips trailing ellipsis)
             raw_title = item.get("title", "")
             hl = raw_title[:55].rsplit(" ", 1)[0] if len(raw_title) > 55 else raw_title
@@ -875,6 +978,13 @@ async def generate_post_image(
         if mode == "take":
             fx = item.get("_fixture")
             if fx:
+                home = fx.get("home", "")
+                away = fx.get("away", "")
+                # Try to find a real celebration/match photo first
+                action = await _search_action_image(home, away)
+                if action:
+                    return action
+                # Fall back to scoreline card
                 from wc_fixtures import fetch_fixture_result
                 result = await fetch_fixture_result(fx.get("fixture_id"))
                 return await _take_card(fx, result=result)

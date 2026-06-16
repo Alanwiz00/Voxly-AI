@@ -133,6 +133,12 @@ def _api_fixture_to_local(f: dict, group_map: dict[str, str]) -> dict | None:
         away_name = teams["away"]["name"]
         group     = group_map.get(home_name) or group_map.get(away_name) or "?"
 
+        _PLACEHOLDER = {"unrevealed", "unknown", "tbd", "tba", "n/a", ""}
+        raw_venue = (fixture.get("venue", {}).get("name", "") or "").strip()
+        raw_city  = (fixture.get("venue", {}).get("city", "") or "").strip()
+        venue = "" if raw_venue.lower() in _PLACEHOLDER else raw_venue
+        city  = "" if raw_city.lower()  in _PLACEHOLDER else raw_city
+
         return {
             "date":        et_dt.date().isoformat(),
             "home":        home_name,
@@ -141,8 +147,8 @@ def _api_fixture_to_local(f: dict, group_map: dict[str, str]) -> dict | None:
             "matchday":    _parse_matchday(round_str),
             "kickoff_utc": utc_dt.isoformat(),          # authoritative — used for all scheduling math
             "kickoff_et":  et_dt.strftime("%H:%M"),     # display only
-            "venue":       fixture.get("venue", {}).get("name", "") or "",
-            "city":        fixture.get("venue", {}).get("city", "") or "",
+            "venue":       venue,
+            "city":        city,
             "fixture_id":  fixture.get("id"),
             "status":      fixture.get("status", {}).get("short", "NS"),
             "home_logo":   teams["home"].get("logo", "") or "",
