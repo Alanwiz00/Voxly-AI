@@ -208,19 +208,14 @@ MODE_INSTRUCTIONS = {
         "Write about the FEATURED FIXTURE in the context block — that specific match only.\n\n"
         "POST-MATCH NARRATIVE PATTERN:\n"
         "  1. Open with calm authority: 'No shock. No noise. @beteye_ already knew what was coming.'\n"
-        "  2. Tell the story in tight paragraphs — 2–3 sentences each, blank line between\n"
+        "  2. Tell the story — 2–3 sentences, each on its own line. NO blank lines.\n"
         "  3. Historical depth: a fact that makes the moment feel bigger ('42 years of waiting')\n"
         "  4. Pivot to intelligence: 'See, this is the thing about data intelligence — it doesn't do guessing.'\n"
         "     Pattern: 'It sees the pressure. It feels the weight. It finds the patterns.'\n"
         "  5. Brand stamp: 'While people were reacting, BetEye members were already three steps ahead.'\n"
         "  6. Closing directive or bold statement — never a question.\n\n"
-        "PRE-MATCH HYPE PATTERN:\n"
-        "  1. Historical hook that parallels tonight's stakes (Sevilla, Falcao, past champions)\n"
-        "  2. One sentence per tonight's specific storyline — each line its own paragraph\n"
-        "  3. Pivot: 'Every edge you ever missed was visible to someone.'\n"
-        "  4. Brand stamp + closing directive: 'Don't be on the wrong side of this.'\n\n"
         "RULES:\n"
-        "  Each sentence on its own line. Blank line between sections.\n"
+        "  Each sentence on its own line. NO blank lines between sentences.\n"
         "  Specific: player names, records, years, goals, stadiums.\n"
         "  Never say 'according to' or name any outlet.\n"
         "  At most ONE question mark total.\n\n"
@@ -242,30 +237,29 @@ MODE_INSTRUCTIONS = {
     "matchday": (
         "TASK — PRE-MATCH HYPE (ONE GAME ONLY)\n"
         "Write about EXACTLY the fixture in HEADLINE. One match. Nothing else.\n\n"
-        "STRUCTURE (each sentence on its own line, blank line between sections):\n"
-        "  [Hook — a stat, record, rivalry, or storyline that makes THIS specific game unmissable. 1–2 sentences.]\n\n"
+        "STRUCTURE: Each sentence on its own line. NO blank lines anywhere.\n"
+        "  [Hook — a stat, record, or storyline that makes THIS game unmissable. 1–2 sentences.]\n"
         "  [Kickoff bare facts — TIME ET · STADIUM/CITY · Group X.]\n"
         "  [The key tension — one player, one number, one reason to watch.]\n"
-        "  [Edge — one punchy kicker. Can be a prediction or a sharp take.]\n\n"
         "  Every edge you ever missed in any game was visible to someone.\n"
-        "  That someone is @BetEye. 👁\n\n"
-        "  [Close — 1 directive line. No question mark. Example: 'Don't miss this one.' / 'Follow before kickoff.']\n\n"
+        "  That someone is @BetEye. 👁\n"
+        "  [Close — 1 directive line. No question mark.]\n\n"
         "RULES:\n"
         "- This match ONLY. Do not mention any other game.\n"
+        "- NO blank lines between sentences — tight, punchy, no gaps.\n"
         "- Use kickoff time and venue from FEATURED FIXTURE.\n"
         "- Specific: name players, cite a real number, name the stadium.\n"
         "- Max ONE question mark in the entire post.\n"
         "- Max 400 chars total.\n\n"
         "EXAMPLE OUTPUT:\n"
         "France haven't lost a World Cup group stage game in 12 years.\n"
-        "Senegal ended that streak once before. 2002. Remember.\n\n"
+        "Senegal ended that streak once before. 2002. Remember.\n"
         "3PM ET · MetLife Stadium · Group I.\n"
         "Mbappé vs Édouard Mendy. The one duel that decides this.\n"
-        "Senegal don't concede goals — they concede moments.\n\n"
         "Every edge you ever missed in any game was visible to someone.\n"
-        "That someone is @BetEye. 👁\n\n"
+        "That someone is @BetEye. 👁\n"
         "Set your alarm.\n\n"
-        "Max 500 chars."
+        "Max 400 chars."
     ),
 
     "news": (
@@ -469,9 +463,9 @@ def _load_intelligence() -> dict:
 
 def _select_mode(item: dict, is_breaking: bool, post_index: int) -> str:
     """
-    Choose content mode. List/ranking articles always get 'list' mode.
-    Breaking news always gets 'news'. On match days, first post of a run
-    gets 'matchday' ~50% of the time. Otherwise use learned performance weights.
+    Choose content mode for queue-based posts (breaking news path only).
+    matchday and stat are NEVER assigned here — those come exclusively from
+    scheduled_post_job() which scopes them to a specific fixture.
     """
     if is_breaking:
         return "news"
@@ -479,19 +473,18 @@ def _select_mode(item: dict, is_breaking: bool, post_index: int) -> str:
     if _LIST_TITLE_RE.search(item.get("title", "")):
         return "list"
 
-    # On match days, give the first post of each run a coin-flip chance to be a matchday preview
-    if post_index == 0 and fixture_count_today() >= 2 and random.random() < 0.5:
-        return "matchday"
+    # Queue posts: only news / take / list — never matchday or stat
+    _QUEUE_MODES   = ["news", "take", "list"]
+    _QUEUE_WEIGHTS = [2,      3,      1]
 
     intel = _load_intelligence()
     mode_perf: dict = intel.get("mode_performance", {})
 
     if mode_perf:
-        # Exclude modes not in POST_MODES from learned weights
-        weights = [max(mode_perf.get(m, 1.0), 0.1) for m in POST_MODES]
-        return random.choices(POST_MODES, weights=weights, k=1)[0]
+        weights = [max(mode_perf.get(m, 1.0), 0.1) for m in _QUEUE_MODES]
+        return random.choices(_QUEUE_MODES, weights=weights, k=1)[0]
 
-    return random.choices(POST_MODES, weights=POST_MODE_DEFAULT_WEIGHTS, k=1)[0]
+    return random.choices(_QUEUE_MODES, weights=_QUEUE_WEIGHTS, k=1)[0]
 
 
 async def _generate_post(item: dict, mode: str = "news") -> str | None:
@@ -651,14 +644,13 @@ async def collect_job() -> None:
         })
         added += 1
 
-    # Purge stale items — when fresh context arrives, old items become irrelevant
-    if added > 0:
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=QUEUE_MAX_AGE_HOURS)
-        before_purge = len(queue)
-        queue = [item for item in queue if _item_is_fresh(item, cutoff)]
-        purged = before_purge - len(queue)
-        if purged:
-            log.info(f"[collect] Purged {purged} stale items (>{QUEUE_MAX_AGE_HOURS:.0f}h old)")
+    # Purge stale items every cycle — old items produce out-of-context posts
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=QUEUE_MAX_AGE_HOURS)
+    before_purge = len(queue)
+    queue = [item for item in queue if _item_is_fresh(item, cutoff)]
+    purged = before_purge - len(queue)
+    if purged:
+        log.info(f"[collect] Purged {purged} stale items (>{QUEUE_MAX_AGE_HOURS:.0f}h old)")
 
     queue.sort(key=lambda x: (x.get("is_breaking", False), x.get("score", 0)), reverse=True)
     queue = queue[:200]
@@ -1145,6 +1137,15 @@ async def main() -> None:
 
     # Validate X (Twitter) credentials before anything else
     validate_credentials()
+
+    # Purge stale queue items on startup so old-match content can't sneak into posts
+    _queue: list = _load_json(QUEUE_FILE, [])
+    _cutoff = datetime.now(timezone.utc) - timedelta(hours=QUEUE_MAX_AGE_HOURS)
+    _before = len(_queue)
+    _queue = [i for i in _queue if _item_is_fresh(i, _cutoff)]
+    if _before - len(_queue):
+        log.info(f"[startup] Purged {_before - len(_queue)} stale queue items")
+        _save_json(QUEUE_FILE, _queue)
 
     # Fetch live WC schedule from API Football (falls back to bundled static file if no key)
     await ensure_schedule_fresh()
