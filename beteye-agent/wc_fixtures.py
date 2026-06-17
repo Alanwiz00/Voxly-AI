@@ -290,6 +290,7 @@ def _load_schedule() -> list[dict]:
     """Load live cache if available, else bundled static file."""
     if _CACHE_FILE.exists():
         return _load_cache()
+    log.warning("[fixtures] API cache missing — using static fallback (kickoff times may be approximate)")
     return _load_static()
 
 

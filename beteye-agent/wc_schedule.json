@@ -24,8 +24,8 @@
   {"date":"2026-06-16","home":"Argentina","away":"Algeria","group":"J","matchday":1,"kickoff_et":"21:00","venue":"Arrowhead Stadium","city":"Kansas City","confirmed":true},
   {"date":"2026-06-17","home":"Jordan","away":"Austria","group":"J","matchday":1,"kickoff_et":"00:00","venue":"","city":"","confirmed":true},
 
-  {"date":"2026-06-17","home":"Portugal","away":"Colombia","group":"K","matchday":1,"kickoff_et":"12:00","venue":"Rose Bowl","city":"Pasadena CA","confirmed":false},
-  {"date":"2026-06-17","home":"DR Congo","away":"Uzbekistan","group":"K","matchday":1,"kickoff_et":"15:00","venue":"","city":"","confirmed":false},
+  {"date":"2026-06-17","home":"Portugal","away":"DR Congo","group":"K","matchday":1,"kickoff_et":"15:00","kickoff_utc":"2026-06-17T19:00:00+00:00","venue":"","city":"","confirmed":true},
+  {"date":"2026-06-17","home":"Colombia","away":"Uzbekistan","group":"K","matchday":1,"kickoff_et":"22:00","kickoff_utc":"2026-06-18T02:00:00+00:00","venue":"Rose Bowl","city":"Pasadena CA","confirmed":true},
   {"date":"2026-06-17","home":"England","away":"Croatia","group":"L","matchday":1,"kickoff_et":"16:00","venue":"AT&T Stadium","city":"Arlington TX","confirmed":true},
   {"date":"2026-06-17","home":"Ghana","away":"Panama","group":"L","matchday":1,"kickoff_et":"19:00","venue":"","city":"","confirmed":true},
 

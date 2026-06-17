@@ -132,7 +132,7 @@ def _has_wc_signal(item: dict) -> bool:
     return has_core
 
 BANNED_PHRASES = (
-    "game-changer, game changer, double high-five, let that sink in, buckle up, "
+    "game-changer, game changer, double high-five, double high fives, let that sink in, buckle up, "
     "this is huge, groundbreaking, revolutionary, it's no secret, dive into, delve into, "
     "in a world where, at the end of the day, moving the needle, it's worth noting, "
     "make no mistake, what a time to be alive, truly remarkable, I cannot stress enough, "
@@ -142,7 +142,14 @@ BANNED_PHRASES = (
     "one to watch, ones to watch, key player, unsung talent, unsung hero, "
     "could be crucial, might just, spotlight is on, all eyes on, dynamics of, "
     "narrative, storyline, fascinating, intriguing, captivating, compelling, "
-    "football world, football fans, the beautiful game"
+    "football world, football fans, the beautiful game, "
+    "no small feat, it goes without saying, it's fair to say, safe to say, "
+    "one thing is clear, it's clear that, speaks volumes, level up, hit different, "
+    "on another level, more than just, more than a game, more than a match, "
+    "this is not just, it's not just, a testament to, testament to their, "
+    "electric atmosphere, packed stadium, roaring crowd, fever pitch, "
+    "pride of a nation, moment of the tournament, history books, rewrite history, "
+    "seize the moment, rise to the occasion, the stage is set"
 )
 
 # ---------------------------------------------------------------------------
@@ -152,15 +159,20 @@ POST_MODES = ["news", "stat", "take", "matchday"]
 # Default weights — lean heavily on take + matchday, less raw news
 POST_MODE_DEFAULT_WEIGHTS = [1, 2, 3, 2]  # news:stat:take:matchday
 
-# Per-mode character limits — X Premium Basic allows 4,000 chars
+# Hard Twitter post limit — 280 for standard accounts, up to 4000 for X Premium.
+# Set TWITTER_CHAR_LIMIT in .env to increase once the account is on X Premium.
+TWITTER_CHAR_LIMIT = int(os.environ.get("TWITTER_CHAR_LIMIT", "270"))
+
+# Per-mode character limits — model generates up to this much content.
+# Must not exceed TWITTER_CHAR_LIMIT; these act as a style guide, not a hard cap.
 MODE_CHAR_LIMITS = {
-    "news":     1000,
-    "stat":      900,
-    "take":     2000,
-    "breaking": 2500,  # long-form post-match report — X Premium
-    "matchday":  500,
-    "list":     4000,
-    "reply":     280,
+    "news":     TWITTER_CHAR_LIMIT,
+    "stat":     TWITTER_CHAR_LIMIT,
+    "take":     TWITTER_CHAR_LIMIT,
+    "breaking": TWITTER_CHAR_LIMIT,
+    "matchday": TWITTER_CHAR_LIMIT,
+    "list":     TWITTER_CHAR_LIMIT,
+    "reply":    min(TWITTER_CHAR_LIMIT, 270),
 }
 
 # Detect list/ranking articles that deserve a long-form treatment
@@ -205,7 +217,7 @@ MODE_INSTRUCTIONS = {
         "Tonight he's at Anfield.\n"
         "What market are you betting?\n\n"
         "Drop it below 👇\n\n"
-        "Max 900 chars."
+        "Max 260 chars."
     ),
 
     "breaking": (
@@ -253,7 +265,7 @@ MODE_INSTRUCTIONS = {
         "- FEATURED FIXTURE only. Real names, real numbers, real moments.\n"
         "- Never name outlets. Never say 'according to'.\n"
         "- At most ONE question mark total.\n"
-        "- Max 800 chars.\n\n"
+        "- Max 260 chars.\n\n"
         "EXAMPLE (France vs Senegal, France wins 1-0, Mbappé goal 74'):\n"
         "Mbappé, 74 minutes. Right when Senegal started believing.\n"
         "The opener is always about nerves. France absorbed them until they didn't need to.\n"
@@ -261,7 +273,7 @@ MODE_INSTRUCTIONS = {
         "France have now won 9 of their last 10 WC group stage games.\n"
         "The data had France winning this one. The pattern was clear from the lineup. @BetEye_ 👁\n"
         "Next fixture matters more.\n\n"
-        "Max 800 chars."
+        "Max 260 chars."
     ),
 
     "matchday": (
@@ -286,7 +298,7 @@ MODE_INSTRUCTIONS = {
         "- ONE match only. Never reference another game.\n"
         "- Real names, real numbers, real history. Nothing invented.\n"
         "- Max ONE question mark total.\n"
-        "- Max 420 chars total.\n\n"
+        "- Max 260 chars total.\n\n"
         "EXAMPLE OUTPUT:\n"
         "FRANCE VS SENEGAL\n"
         "3PM ET · MetLife Stadium · East Rutherford · Group I.\n"
@@ -312,14 +324,14 @@ MODE_INSTRUCTIONS = {
         "- No outlet names. No 'reportedly' or 'according to'.\n"
         "- Real names, real numbers. Nothing vague.\n"
         "- At most ONE question mark total. Prefer no question marks.\n"
-        "- Max 500 chars.\n\n"
+        "- Max 260 chars.\n\n"
         "EXAMPLE OUTPUT:\n"
         "Rodri will miss the rest of the World Cup group stage.\n"
         "Spain's midfield shape just changed completely.\n"
         "7.2 ball recoveries per 90 — no one else in this squad does that.\n"
         "That defensive gap is now a tournament-wide conversation.\n"
         "How far can Spain go without him?\n\n"
-        "Max 500 chars."
+        "Max 260 chars."
     ),
 
     "list": (
@@ -731,7 +743,8 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
         f"- If a team in the article has an UPCOMING fixture today (not yet started), you may reference it with 'tonight' or '[city]' — never state a kickoff time for a match that has already been played.\n"
         f"- Do not start with 'I'.\n"
         f"- At most ONE question mark in the entire post. Never more than one.\n"
-        f"- BANNED PHRASES (never use these): {BANNED_PHRASES}"
+        f"- BANNED PHRASES — do NOT use ANY of these words or phrases, not even close variants: {BANNED_PHRASES}\n"
+        f"- Write like a sharp human analyst, not an AI assistant. No hype language, no vague gestures at significance. Every sentence earns its place."
     )
 
     form_data: dict = {
@@ -743,17 +756,29 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
     if PERSONA_ID:
         form_data["persona_id"] = str(PERSONA_ID)
 
-    async with httpx.AsyncClient(
-        base_url=VOXLY_API_URL,
-        headers={"Authorization": f"Bearer {VOXLY_API_KEY}"},
-        timeout=90.0,
-    ) as client:
-        resp = await client.post("/generate/from-source", data=form_data)
-        resp.raise_for_status()
-        results = resp.json().get("results", [])
-        if not results:
-            return None
-        text = results[0]["content"].strip()
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(
+                base_url=VOXLY_API_URL,
+                headers={"Authorization": f"Bearer {VOXLY_API_KEY}"},
+                timeout=httpx.Timeout(connect=15.0, read=120.0, write=15.0, pool=15.0),
+            ) as client:
+                resp = await client.post("/generate/from-source", data=form_data)
+                resp.raise_for_status()
+                results = resp.json().get("results", [])
+                if not results:
+                    return None
+                text = results[0]["content"].strip()
+                break  # success
+        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+            wait = 10 * (attempt + 1)
+            log.warning(f"[generate] Attempt {attempt + 1}/3 timed out — retrying in {wait}s ({exc})")
+            await asyncio.sleep(wait)
+    else:
+        log.error(f"[generate] All 3 attempts failed: {last_exc}")
+        return None
 
     import re
 
@@ -777,25 +802,26 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
     text = "\n".join(merged).strip()
 
     # Truncate at sentence boundary — never cut mid-sentence.
-    # Drop whole lines from the end until the text fits, then verify the
-    # last kept line ends on a sentence-ending character.
-    if len(text) > char_limit:
-        # Work line-by-line (blank lines separate content) so we never orphan half a sentence
+    # Applies twice: once for the mode char_limit (style cap) and once for
+    # TWITTER_CHAR_LIMIT (hard API cap). Both use the same logic.
+    def _truncate_to(t: str, limit: int) -> str:
+        if len(t) <= limit:
+            return t
         kept: list[str] = []
-        budget = char_limit
-        for part in text.split("\n"):
+        for part in t.split("\n"):
             candidate = "\n".join(kept + [part]) if kept else part
-            if len(candidate) <= budget:
+            if len(candidate) <= limit:
                 kept.append(part)
             else:
                 break
-        text = "\n".join(kept).rstrip()
-        # If the last non-empty line doesn't end a sentence, drop it too
-        content_lines = [l for l in text.split("\n") if l.strip()]
-        while content_lines and not content_lines[-1].rstrip().endswith((".", "!", "?", "👁", "🔥", "⚡")):
+        clipped = "\n".join(kept).rstrip()
+        content_lines = [l for l in clipped.split("\n") if l.strip()]
+        while content_lines and not content_lines[-1].rstrip().endswith((".", "!", "?", "👁", "🔥", "⚡", "👇")):
             content_lines.pop()
-            # rebuild with blank-line separation
-        text = "\n\n".join(content_lines)
+        return "\n\n".join(content_lines)
+
+    text = _truncate_to(text, char_limit)
+    text = _truncate_to(text, TWITTER_CHAR_LIMIT)  # hard cap — never exceeds what Twitter accepts
 
     return text
 
