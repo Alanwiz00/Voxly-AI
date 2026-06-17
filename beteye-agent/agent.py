@@ -375,6 +375,46 @@ def _item_is_fresh(item: dict, cutoff: datetime) -> bool:
         return True  # keep items we can't parse rather than silently drop them
 
 
+def _item_has_live_context(item: dict) -> bool:
+    """
+    Return True if the queue item is contextually relevant right now.
+    Rejects items that only mention teams whose matches finished >90 min ago —
+    those produce stale out-of-context posts.
+    """
+    from wc_fixtures import get_todays_fixtures
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    fixtures = get_todays_fixtures()
+    if not fixtures:
+        return True  # no fixture data — give the item the benefit of the doubt
+
+    text = (item.get("title", "") + " " + item.get("summary", "")).lower()
+    now  = datetime.now(ZoneInfo("America/New_York"))
+
+    mentioned: list[dict] = [
+        fx for fx in fixtures
+        if fx.get("home", "").lower() in text or fx.get("away", "").lower() in text
+    ]
+    if not mentioned:
+        return True  # item not about today's teams — let it through
+
+    # If ANY mentioned fixture is still live or upcoming, the item is relevant
+    from wc_fixtures import _parse_ko
+    for fx in mentioned:
+        try:
+            ko      = _parse_ko(fx)
+            elapsed = (now - ko).total_seconds() / 60
+            # upcoming (not started yet) or within 110 min of kickoff (match window)
+            if elapsed < 110:
+                return True
+        except Exception:
+            return True
+
+    # All mentioned fixtures ended >90 min ago — stale context
+    return False
+
+
 def _score_item(item: dict) -> int:
     text  = (item.get("title", "") + " " + item.get("summary", "")).lower()
     score = sum(w for kw, w in WC_KEYWORDS.items() if kw in text)
@@ -396,6 +436,64 @@ def _mark_posted() -> None:
     state = _load_json(STATE_FILE, {})
     state["last_posted_at"] = datetime.now(timezone.utc).isoformat()
     _save_json(STATE_FILE, state)
+
+
+def _breaking_already_fired(slug: str) -> bool:
+    """True if we already fired breaking news for this match slug in the last 3 hours."""
+    state = _load_json(STATE_FILE, {})
+    fired: dict = state.get("breaking_fired", {})
+    last = fired.get(slug)
+    if not last:
+        return False
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() / 3600
+        return age < 3.0
+    except Exception:
+        return False
+
+
+def _mark_breaking_fired(slug: str) -> None:
+    state = _load_json(STATE_FILE, {})
+    fired: dict = state.get("breaking_fired", {})
+    fired[slug] = datetime.now(timezone.utc).isoformat()
+    # Keep only last 24h of entries
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    fired  = {k: v for k, v in fired.items() if v > cutoff}
+    state["breaking_fired"] = fired
+    _save_json(STATE_FILE, state)
+
+
+def _breaking_has_enough_context(item: dict) -> bool:
+    """
+    True if breaking news has real live context:
+    - A WC fixture is currently in-play, OR
+    - The item was collected in the last 20 minutes (very fresh — genuine scoop)
+    Either condition is enough. Prevents stale 'breaking' items from jumping the queue.
+    """
+    from wc_fixtures import get_todays_fixtures, _parse_ko
+    from zoneinfo import ZoneInfo
+
+    now = datetime.now(ZoneInfo("America/New_York"))
+
+    # Check for a currently-live fixture (elapsed < 110min)
+    for fx in get_todays_fixtures():
+        try:
+            ko      = _parse_ko(fx)
+            elapsed = (now - ko).total_seconds() / 60
+            if 0 <= elapsed < 110:
+                return True
+        except Exception:
+            continue
+
+    # Fall back: item must be very fresh
+    try:
+        ts = datetime.fromisoformat(item.get("collected_at", "2000-01-01T00:00:00+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        age_mins = (datetime.now(timezone.utc) - ts).total_seconds() / 60
+        return age_mins < 20
+    except Exception:
+        return False
 
 
 def _get_daily_count() -> int:
@@ -721,8 +819,33 @@ async def collect_job() -> None:
     gap = _minutes_since_last_post()
 
     if has_breaking:
-        log.info(f"[collect] BREAKING NEWS detected — posting immediately (gap was {gap:.0f}min)")
-        await post_job()
+        # Find the highest-scoring breaking item to check context and dedup
+        breaking_items = sorted(
+            [q for q in queue if q.get("is_breaking")],
+            key=lambda x: x.get("score", 0), reverse=True,
+        )
+        best = breaking_items[0] if breaking_items else None
+
+        # Derive a match slug from today's fixture context for dedup
+        slug = "generic"
+        if best:
+            from wc_fixtures import get_todays_fixtures
+            text = (best.get("title", "") + " " + best.get("summary", "")).lower()
+            for fx in get_todays_fixtures():
+                home = fx.get("home", "").lower()
+                away = fx.get("away", "").lower()
+                if home in text or away in text:
+                    slug = f"{fx.get('home', '')}_{fx.get('away', '')}_{fx.get('date', '')}"
+                    break
+
+        if not best or not _breaking_has_enough_context(best):
+            log.info("[collect] Breaking item found but no live fixture — deferring to schedule")
+        elif _breaking_already_fired(slug):
+            log.info(f"[collect] Breaking already fired for {slug} — skipping duplicate")
+        else:
+            log.info(f"[collect] BREAKING NEWS — posting immediately (slug={slug}, gap={gap:.0f}min)")
+            _mark_breaking_fired(slug)
+            await post_job()
     else:
         log.info(f"[collect] {added} new items queued (next scheduled slot will pick them up)")
 
@@ -759,6 +882,11 @@ async def post_job() -> None:
         if posted >= posts_this_run:
             break
 
+        # Skip items whose only relevant fixtures already finished — avoids out-of-context posts
+        if not _item_has_live_context(item):
+            log.info(f"[poster] Skipping stale-context item: {item.get('title', '')[:60]}")
+            continue
+
         mode = _select_mode(item=item, is_breaking=item.get("is_breaking", False), post_index=posted)
 
         # Determine if this should be posted as a reply
@@ -787,17 +915,18 @@ async def post_job() -> None:
                 log.warning("[poster] Empty generation — skipping")
                 continue
 
-            # Generate a contextual image for this post
+            # Images only for matchday posts — other modes post text-only for now
             image_path = None
-            try:
-                image_path = await generate_post_image(
-                    item=item,
-                    mode=mode,
-                    post_text=text,
-                    today_fixtures=get_todays_fixtures(),
-                )
-            except Exception as img_err:
-                log.warning(f"[poster] Image generation failed (posting without): {img_err}")
+            if mode == "matchday":
+                try:
+                    image_path = await generate_post_image(
+                        item=item,
+                        mode=mode,
+                        post_text=text,
+                        today_fixtures=get_todays_fixtures(),
+                    )
+                except Exception as img_err:
+                    log.warning(f"[poster] Image generation failed (posting without): {img_err}")
 
             media_id: str | None = None
             if image_path and not DRY_RUN:
@@ -917,14 +1046,15 @@ async def scheduled_post_job(mode: str, fixture: dict | None, label: str, slot_k
         log.warning(f"[schedule] Empty generation — skipping [{label}]")
         return
 
-    # Image
+    # Images only for matchday posts
     image_path = None
-    try:
-        image_path = await generate_post_image(
-            item=item, mode=mode, post_text=text, today_fixtures=get_todays_fixtures()
-        )
-    except Exception as img_err:
-        log.warning(f"[schedule] Image gen failed (posting without): {img_err}")
+    if mode == "matchday":
+        try:
+            image_path = await generate_post_image(
+                item=item, mode=mode, post_text=text, today_fixtures=get_todays_fixtures()
+            )
+        except Exception as img_err:
+            log.warning(f"[schedule] Image gen failed (posting without): {img_err}")
 
     media_id: str | None = None
     if image_path and not DRY_RUN:
