@@ -157,6 +157,7 @@ MODE_CHAR_LIMITS = {
     "news":     1000,
     "stat":      900,
     "take":     2000,
+    "breaking": 2500,  # long-form post-match report — X Premium
     "matchday":  500,
     "list":     4000,
     "reply":     280,
@@ -207,6 +208,29 @@ MODE_INSTRUCTIONS = {
         "Max 900 chars."
     ),
 
+    "breaking": (
+        "TASK — POST-MATCH BREAKING REPORT (FEATURED FIXTURE only)\n"
+        "1 hour has passed since this match ended. You have collected articles, stats, and reactions.\n"
+        "Write a comprehensive post-match intelligence report — specific, sharp, no fluff.\n\n"
+        "⚠ FORMAT — NON-NEGOTIABLE: Every sentence/paragraph on its own line, separated by a blank line.\n\n"
+        "STRUCTURE:\n"
+        "  Line 1: MATCH TITLE in ALL CAPS — e.g. 'FRANCE 2 – 0 SENEGAL'\n"
+        "           Use ONLY the VERIFIED SCORE from context. Never guess.\n"
+        "  Line 2–3: The story in 2 lines. What decided it. Key moment or player.\n"
+        "  Line 4–5: The numbers — stats, records, historical context that make this result bigger.\n"
+        "  Line 6: Group table implication — what this means for Group X standings.\n"
+        "  Line 7: One player spotlight — who showed up or bottled it.\n"
+        "  Line 8: BetEye intelligence angle — what the data said before the match that now makes sense.\n"
+        "           End with @BetEye_ 👁. Never use the stock phrase.\n"
+        "  Line 9: Closing — where does this team go from here. Bold, no question mark.\n\n"
+        "RULES:\n"
+        "- FEATURED FIXTURE only. One match. Nothing else.\n"
+        "- Use the VERIFIED SCORE — do NOT invent any goal numbers.\n"
+        "- Real player names, real stats from ARTICLE CONTENT. Nothing fabricated.\n"
+        "- No outlet names. No 'reportedly'.\n"
+        "- Max 2,500 chars."
+    ),
+
     "take": (
         "TASK — POST-MATCH SHARP TAKE\n"
         "Write a reaction post about the FEATURED FIXTURE — that match only.\n\n"
@@ -252,12 +276,12 @@ MODE_INSTRUCTIONS = {
         "  Line 3: Hook — sharp fact, record, or rivalry specific to THIS match\n"
         "  Line 4: (optional) second hook if it adds weight\n"
         "  Line 5: The duel — one player vs one player, or one stat that defines this game\n"
-        "  Line 6: BetEye organic angle — its own line, NOT attached to the previous sentence.\n"
-        "           NOT the stock phrase. Write something specific to THIS game. End with @BetEye_ 👁\n"
+        "  Line 6: Closing — ONE of: a punchy bold statement, an engagement question, or a BetEye intelligence angle ending with @BetEye_ 👁.\n"
+        "           Do NOT default to @BetEye_ every time. Vary it. Only use it when it genuinely adds.\n"
         "           Examples:\n"
-        "             'The data on Messi in tournament openers tells a specific story. @BetEye_ 👁'\n"
-        "             'Whoever wins the midfield battle wins this. @BetEye_ sees exactly where it breaks.👁'\n"
-        "  Line 7: Closing directive — short, punchy. No question mark.\n\n"
+        "             'Don't sleep on this one.' (bold)\n"
+        "             'Who wins this? Drop your pick 👇' (engagement)\n"
+        "             'Whoever wins the midfield battle wins this. @BetEye_ sees exactly where it breaks. 👁' (brand)\n\n"
         "RULES:\n"
         "- ONE match only. Never reference another game.\n"
         "- Real names, real numbers, real history. Nothing invented.\n"
@@ -281,16 +305,12 @@ MODE_INSTRUCTIONS = {
         "  Line 1: The fact. One line. Names, numbers, stakes. Nothing soft.\n"
         "  Line 2-3: Why it changes something — what it means for the tournament.\n"
         "  Line 4 (if applicable): If a related fixture is UPCOMING TODAY and hasn't kicked off yet, reference it by city or time — never repeat a time for a match that already happened.\n"
-        "  Line 5: BetEye organic angle — mandatory. Tie the intelligence lens to this specific story.\n"
-        "           NOT the stock phrase. Something specific.\n"
-        "           Examples:\n"
-        "             'This is exactly the kind of shift that changes pre-match models. @BetEye_ 👁'\n"
-        "             'The edge in situations like this belongs to whoever reads it first. @BetEye_ 👁'\n"
-        "             'BetEye members saw the risk in this lineup before kickoff. @BetEye_ 👁'\n\n"
+        "  Line 5: Closing — ONE of: a punchy consequence statement, an engagement hook, or (occasionally) a BetEye angle ending @BetEye_ 👁.\n"
+        "           Do NOT add @BetEye_ to every post. Use it at most once every 3-4 posts, when it genuinely fits.\n"
+        "           Most of the time, close with a bold statement or engagement line instead.\n\n"
         "RULES:\n"
         "- No outlet names. No 'reportedly' or 'according to'.\n"
         "- Real names, real numbers. Nothing vague.\n"
-        "- @BetEye_ mention is mandatory in the final line.\n"
         "- At most ONE question mark total. Prefer no question marks.\n"
         "- Max 500 chars.\n\n"
         "EXAMPLE OUTPUT:\n"
@@ -298,7 +318,7 @@ MODE_INSTRUCTIONS = {
         "Spain's midfield shape just changed completely.\n"
         "7.2 ball recoveries per 90 — no one else in this squad does that.\n"
         "That defensive gap is now a tournament-wide conversation.\n"
-        "The data on Spain's exposure without Rodri has been visible for weeks. @BetEye_ 👁\n\n"
+        "How far can Spain go without him?\n\n"
         "Max 500 chars."
     ),
 
@@ -441,10 +461,22 @@ def _mark_posted() -> None:
 def _breaking_daily_count() -> int:
     """How many breaking posts have fired today."""
     state    = _load_json(STATE_FILE, {})
-    today    = datetime.now(timezone.utc).date().isoformat()
     fired    = state.get("breaking_fired", {})
     today_ts = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     return sum(1 for v in fired.values() if v >= today_ts)
+
+
+def _mins_since_last_breaking() -> float:
+    """Minutes since any breaking post fired (independent of scheduled posts)."""
+    state = _load_json(STATE_FILE, {})
+    fired = state.get("breaking_fired", {})
+    if not fired:
+        return float("inf")
+    latest = max(fired.values())
+    try:
+        return (datetime.now(timezone.utc) - datetime.fromisoformat(latest)).total_seconds() / 60
+    except Exception:
+        return float("inf")
 
 
 def _breaking_already_fired(slug: str) -> bool:
@@ -631,10 +663,31 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
     # doesn't write about other games. For everything else, inject today's full slate.
     specific_fx = item.get("_fixture")
     if specific_fx and mode in ("matchday", "stat", "take"):
-        from wc_fixtures import format_match_context
+        from wc_fixtures import format_match_context, fetch_fixture_result
         fixture_ctx = format_match_context([specific_fx], "FEATURED FIXTURE")
+        # Inject the verified live/final score so the model never halluccinates the scoreline
+        live_result = await fetch_fixture_result(specific_fx.get("fixture_id"))
+        if live_result and live_result.get("home_goals") is not None:
+            hg     = live_result["home_goals"]
+            ag     = live_result["away_goals"]
+            status = live_result.get("status", "NS")
+            elapsed = live_result.get("elapsed")
+            home   = specific_fx.get("home", "")
+            away   = specific_fx.get("away", "")
+            if status in ("FT", "AET", "PEN"):
+                score_line = f"VERIFIED FINAL SCORE: {home} {hg} – {ag} {away} (Full Time)"
+            elif status in ("1H", "HT", "2H", "ET", "P") and elapsed:
+                score_line = f"VERIFIED LIVE SCORE: {home} {hg} – {ag} {away} ({elapsed}')"
+            elif status == "HT":
+                score_line = f"VERIFIED HALF-TIME SCORE: {home} {hg} – {ag} {away}"
+            else:
+                score_line = f"VERIFIED SCORE: {home} {hg} – {ag} {away} (status: {status})"
+            fixture_ctx = score_line + "\n" + fixture_ctx
+        else:
+            live_result = None
     else:
-        fixture_ctx = get_fixture_context_block()
+        fixture_ctx  = get_fixture_context_block()
+        live_result  = None
     fixture_block = f"\n{fixture_ctx}\n" if fixture_ctx else ""
 
     # Inject learned intelligence
@@ -668,6 +721,11 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
         f"{learned_block}\n\n"
         f"HARD RULES:\n"
         f"- Only state facts from ARTICLE CONTENT or TODAY'S WC 2026 FIXTURES. Do NOT invent stats.\n"
+        + (
+            f"- SCORELINE IS VERIFIED ABOVE. Use ONLY those exact goal numbers. "
+            f"NEVER invent or guess any score, goal count, or match result.\n"
+            if live_result and live_result.get("home_goals") is not None else ""
+        ) +
         f"- NEVER mention any media outlet, website, or publication name.\n"
         f"- Be specific — name a player, country, stadium, number, or fixture. Never be vague.\n"
         f"- If a team in the article has an UPCOMING fixture today (not yet started), you may reference it with 'tonight' or '[city]' — never state a kickoff time for a match that has already been played.\n"
@@ -855,42 +913,11 @@ async def collect_job() -> None:
         )
         return
 
-    # --- Breaking news bypasses the schedule and posts immediately ---
-    gap = _minutes_since_last_post()
-
+    # Breaking items are flagged in the queue and will be picked up by the
+    # scheduled breaking slot that fires 1h after each match ends.
+    # There is no real-time bypass — the buffer window is intentional.
     if has_breaking:
-        # Find the highest-scoring breaking item to check context and dedup
-        breaking_items = sorted(
-            [q for q in queue if q.get("is_breaking")],
-            key=lambda x: x.get("score", 0), reverse=True,
-        )
-        best = breaking_items[0] if breaking_items else None
-
-        # Derive a match slug from today's fixture context for dedup
-        slug = "generic"
-        if best:
-            from wc_fixtures import get_todays_fixtures
-            text = (best.get("title", "") + " " + best.get("summary", "")).lower()
-            for fx in get_todays_fixtures():
-                home = fx.get("home", "").lower()
-                away = fx.get("away", "").lower()
-                if home in text or away in text:
-                    slug = f"{fx.get('home', '')}_{fx.get('away', '')}_{fx.get('date', '')}"
-                    break
-
-        daily_breaking = _breaking_daily_count()
-        if not best or not _breaking_has_enough_context(best):
-            log.info("[collect] Breaking item found but no live fixture — deferring to schedule")
-        elif daily_breaking >= BREAKING_DAILY_CAP:
-            log.info(f"[collect] Breaking daily cap reached ({daily_breaking}/{BREAKING_DAILY_CAP}) — skipping")
-        elif gap < BREAKING_MIN_GAP_MINS:
-            log.info(f"[collect] Breaking gap too short ({gap:.0f}min < {BREAKING_MIN_GAP_MINS}min) — deferring")
-        elif _breaking_already_fired(slug):
-            log.info(f"[collect] Breaking already fired for {slug} — skipping duplicate")
-        else:
-            log.info(f"[collect] BREAKING NEWS — posting immediately (slug={slug}, daily={daily_breaking+1}/{BREAKING_DAILY_CAP})")
-            _mark_breaking_fired(slug)
-            await post_job()
+        log.info(f"[collect] High-priority items queued — breaking slot will pick them up post-match")
     else:
         log.info(f"[collect] {added} new items queued (next scheduled slot will pick them up)")
 
@@ -1057,6 +1084,13 @@ async def scheduled_post_job(mode: str, fixture: dict | None, label: str, slot_k
     """Execute a single scheduled post slot with full mode + daily cap enforcement."""
     log.info(f"[schedule] Slot fired: {label}")
 
+    # Global minimum gap — prevent spam if a breaking post just fired
+    SCHED_MIN_GAP_MINS = 20
+    gap = _minutes_since_last_post()
+    if gap < SCHED_MIN_GAP_MINS:
+        log.info(f"[schedule] Too soon after last post ({gap:.0f}min < {SCHED_MIN_GAP_MINS}min) — skipping [{label}]")
+        return
+
     # Daily total cap
     daily_count = _get_daily_count()
     if daily_count >= DAILY_POST_MAX:
@@ -1073,6 +1107,29 @@ async def scheduled_post_job(mode: str, fixture: dict | None, label: str, slot_k
     # Build or pick a queue item
     if fixture and mode in ("matchday", "stat"):
         item = _fixture_to_item(fixture, mode)
+    elif fixture and mode == "breaking":
+        # For breaking slots, prefer queue items about THIS specific fixture's teams.
+        # Fall back to fixture-synthesised item if nothing relevant was collected.
+        queue    = _load_json(QUEUE_FILE, [])
+        seen_set = set(_load_json(SEEN_FILE, []))
+        home_lc  = fixture.get("home", "").lower()
+        away_lc  = fixture.get("away", "").lower()
+        relevant = [
+            q for q in queue
+            if q["key"] not in seen_set
+            and (
+                home_lc in (q.get("title", "") + q.get("summary", "")).lower()
+                or away_lc in (q.get("title", "") + q.get("summary", "")).lower()
+            )
+        ]
+        if relevant:
+            item = max(relevant, key=lambda x: x.get("score", 0))
+            log.info(f"[schedule] Breaking: picked {len(relevant)} relevant queue items for {fixture.get('home')} vs {fixture.get('away')}")
+        else:
+            log.info(f"[schedule] Breaking: no queue items for {fixture.get('home')} vs {fixture.get('away')} — using fixture context")
+            item = _fixture_to_item(fixture, mode)
+        # Always attach the fixture so the prompt gets the verified score
+        item["_fixture"] = fixture
     else:
         queue: list[dict] = _load_json(QUEUE_FILE, [])
         if not queue:

@@ -29,6 +29,7 @@ MODE_DAILY_CAPS: dict[str, int] = {
     "matchday": 99,  # one per fixture, uncapped
     "stat":      1,
     "take":      2,
+    "breaking":  4,  # one per fixture — fires 1h after match ends
     "news":      1,
     "list":      1,
 }
@@ -149,7 +150,27 @@ def build_daily_schedule(
             slot_key=slot_key,
         ))
 
-    # ── 4. News post — 09:30 ET fixed slot ─────────────────────────────────
+    # ── 4. Breaking posts — 1h after each match ends, one per fixture ────────
+    # Fires at kickoff + 110min (match window) + 60min (context accumulation).
+    # During that 60-min buffer the queue collects post-match articles, stats,
+    # and reactions. The breaking slot then picks the best and writes a deep
+    # contextual post grounded in real collected content.
+    for fx in by_kickoff:
+        ko         = _kickoff_et(fx)
+        breaking_at = ko + timedelta(minutes=170)
+        if breaking_at <= now:
+            continue
+        slug     = f"{fx['home']}_{fx['away']}"
+        slot_key = f"breaking_{fx.get('date', today_str)}_{slug}"
+        slots.append(PostSlot(
+            run_at=breaking_at,
+            mode="breaking",
+            fixture=fx,
+            label=f"breaking: {fx['home']} vs {fx['away']} post-match report",
+            slot_key=slot_key,
+        ))
+
+    # ── 5. News post — 09:30 ET fixed slot ─────────────────────────────────
     news_at = now.replace(hour=9, minute=30, second=0, microsecond=0)
     if news_at <= now:
         news_at = now + timedelta(minutes=10)  # ASAP if we're past 09:30
