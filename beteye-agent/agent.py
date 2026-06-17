@@ -278,7 +278,7 @@ MODE_INSTRUCTIONS = {
         "STRUCTURE:\n"
         "  Line 1: The fact. One line. Names, numbers, stakes. Nothing soft.\n"
         "  Line 2-3: Why it changes something — what it means for the tournament.\n"
-        "  Line 4 (if applicable): Tie to a game in TODAY'S FIXTURES — '[Team] kick off at [time] ET.'\n"
+        "  Line 4 (if applicable): If a related fixture is UPCOMING TODAY and hasn't kicked off yet, reference it by city or time — never repeat a time for a match that already happened.\n"
         "  Line 5: BetEye organic angle — mandatory. Tie the intelligence lens to this specific story.\n"
         "           NOT the stock phrase. Something specific.\n"
         "           Examples:\n"
@@ -295,8 +295,8 @@ MODE_INSTRUCTIONS = {
         "Rodri will miss the rest of the World Cup group stage.\n"
         "Spain's midfield shape just changed completely.\n"
         "7.2 ball recoveries per 90 — no one else in this squad does that.\n"
-        "Spain kick off tonight. Different conversation without him.\n"
-        "The data on Spain's defensive exposure without Rodri has been visible for weeks. @BetEye_ 👁\n\n"
+        "That defensive gap is now a tournament-wide conversation.\n"
+        "The data on Spain's exposure without Rodri has been visible for weeks. @BetEye_ 👁\n\n"
         "Max 500 chars."
     ),
 
@@ -661,7 +661,7 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
         f"- Only state facts from ARTICLE CONTENT or TODAY'S WC 2026 FIXTURES. Do NOT invent stats.\n"
         f"- NEVER mention any media outlet, website, or publication name.\n"
         f"- Be specific — name a player, country, stadium, number, or fixture. Never be vague.\n"
-        f"- If a team in the article has a fixture in TODAY'S WC 2026 FIXTURES, reference it ('tonight', '[city]', '[time] ET').\n"
+        f"- If a team in the article has an UPCOMING fixture today (not yet started), you may reference it with 'tonight' or '[city]' — never state a kickoff time for a match that has already been played.\n"
         f"- Do not start with 'I'.\n"
         f"- At most ONE question mark in the entire post. Never more than one.\n"
         f"- BANNED PHRASES (never use these): {BANNED_PHRASES}"
