@@ -53,8 +53,10 @@ POSTS_PER_RUN         = int(os.environ.get("POSTS_PER_RUN", "1"))
 DAILY_POST_MAX        = int(os.environ.get("DAILY_POST_MAX", "20"))
 COLLECT_INTERVAL_MINS = float(os.environ.get("COLLECT_INTERVAL_MINS", "30"))
 STARTUP_GRACE_MINS    = float(os.environ.get("STARTUP_GRACE_MINS", "30"))
-QUEUE_MAX_AGE_HOURS   = float(os.environ.get("QUEUE_MAX_AGE_HOURS", "4"))
+QUEUE_MAX_AGE_HOURS   = float(os.environ.get("QUEUE_MAX_AGE_HOURS", "2"))
 BREAKING_SCORE        = int(os.environ.get("BREAKING_SCORE_THRESHOLD", "6"))
+BREAKING_DAILY_CAP    = int(os.environ.get("BREAKING_DAILY_CAP", "3"))
+BREAKING_MIN_GAP_MINS = int(os.environ.get("BREAKING_MIN_GAP_MINS", "60"))
 DRY_RUN               = os.environ.get("DRY_RUN", "false").lower() == "true"
 ENABLE_REPLIES        = os.environ.get("ENABLE_REPLIES", "false").lower() == "true"
 POST_INTERVAL_SECS    = int(os.environ.get("POST_INTERVAL_SECS", "180"))
@@ -363,9 +365,7 @@ def _item_key(item: dict) -> str:
 
 
 def _item_is_fresh(item: dict, cutoff: datetime) -> bool:
-    """True if the item was collected after cutoff, OR if it's breaking (always keep)."""
-    if item.get("is_breaking", False):
-        return True
+    """True if the item was collected after cutoff. Breaking items get no special exemption."""
     try:
         ts = datetime.fromisoformat(item.get("collected_at", "2000-01-01T00:00:00+00:00"))
         if ts.tzinfo is None:
@@ -436,6 +436,15 @@ def _mark_posted() -> None:
     state = _load_json(STATE_FILE, {})
     state["last_posted_at"] = datetime.now(timezone.utc).isoformat()
     _save_json(STATE_FILE, state)
+
+
+def _breaking_daily_count() -> int:
+    """How many breaking posts have fired today."""
+    state    = _load_json(STATE_FILE, {})
+    today    = datetime.now(timezone.utc).date().isoformat()
+    fired    = state.get("breaking_fired", {})
+    today_ts = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    return sum(1 for v in fired.values() if v >= today_ts)
 
 
 def _breaking_already_fired(slug: str) -> bool:
@@ -709,7 +718,28 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
     # Strip leading/trailing blank lines then rejoin
     text = "\n".join(merged).strip()
 
-    return text[:char_limit]
+    # Truncate at sentence boundary — never cut mid-sentence.
+    # Drop whole lines from the end until the text fits, then verify the
+    # last kept line ends on a sentence-ending character.
+    if len(text) > char_limit:
+        # Work line-by-line (blank lines separate content) so we never orphan half a sentence
+        kept: list[str] = []
+        budget = char_limit
+        for part in text.split("\n"):
+            candidate = "\n".join(kept + [part]) if kept else part
+            if len(candidate) <= budget:
+                kept.append(part)
+            else:
+                break
+        text = "\n".join(kept).rstrip()
+        # If the last non-empty line doesn't end a sentence, drop it too
+        content_lines = [l for l in text.split("\n") if l.strip()]
+        while content_lines and not content_lines[-1].rstrip().endswith((".", "!", "?", "👁", "🔥", "⚡")):
+            content_lines.pop()
+            # rebuild with blank-line separation
+        text = "\n\n".join(content_lines)
+
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -769,6 +799,16 @@ async def collect_job() -> None:
 
         if score < MIN_ITEM_SCORE:
             skipped_low += 1
+            continue
+
+        # Drop items about finished fixtures before they enter the queue
+        candidate = {
+            "title":   item["title"],
+            "summary": item.get("summary", ""),
+            "collected_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if not _item_has_live_context(candidate):
+            skipped_offtopic += 1
             continue
 
         if score >= breaking_score:
@@ -838,12 +878,17 @@ async def collect_job() -> None:
                     slug = f"{fx.get('home', '')}_{fx.get('away', '')}_{fx.get('date', '')}"
                     break
 
+        daily_breaking = _breaking_daily_count()
         if not best or not _breaking_has_enough_context(best):
             log.info("[collect] Breaking item found but no live fixture — deferring to schedule")
+        elif daily_breaking >= BREAKING_DAILY_CAP:
+            log.info(f"[collect] Breaking daily cap reached ({daily_breaking}/{BREAKING_DAILY_CAP}) — skipping")
+        elif gap < BREAKING_MIN_GAP_MINS:
+            log.info(f"[collect] Breaking gap too short ({gap:.0f}min < {BREAKING_MIN_GAP_MINS}min) — deferring")
         elif _breaking_already_fired(slug):
             log.info(f"[collect] Breaking already fired for {slug} — skipping duplicate")
         else:
-            log.info(f"[collect] BREAKING NEWS — posting immediately (slug={slug}, gap={gap:.0f}min)")
+            log.info(f"[collect] BREAKING NEWS — posting immediately (slug={slug}, daily={daily_breaking+1}/{BREAKING_DAILY_CAP})")
             _mark_breaking_fired(slug)
             await post_job()
     else:
