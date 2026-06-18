@@ -238,9 +238,12 @@ MODE_INSTRUCTIONS = {
         "RULES:\n"
         "- FEATURED FIXTURE only. One match. Nothing else.\n"
         "- Use the VERIFIED SCORE — do NOT invent any goal numbers.\n"
-        "- Real player names, real stats from ARTICLE CONTENT. Nothing fabricated.\n"
+        "- STATS: Only use numbers (minutes, career tallies, caps, percentages) that are EXPLICITLY in the article content. "
+        "If a stat is not in the source text, leave it out. Never fill gaps from memory.\n"
+        "- GOAL FRAMING: Never call a goal a 'winner', 'late winner', 'equaliser', or 'opener' unless the source says so. "
+        "State what the scoreline was when it went in (e.g. 'made it 3-2') — that is enough.\n"
         "- No outlet names. No 'reportedly'.\n"
-        "- Max 2,500 chars."
+        "- Max 260 chars."
     ),
 
     "take": (
@@ -743,6 +746,10 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
         f"- If a team in the article has an UPCOMING fixture today (not yet started), you may reference it with 'tonight' or '[city]' — never state a kickoff time for a match that has already been played.\n"
         f"- Do not start with 'I'.\n"
         f"- At most ONE question mark in the entire post. Never more than one.\n"
+        f"- STATS AND NUMBERS — CRITICAL: Only use specific numbers (goal counts, minutes, career tallies, percentages, caps) that appear EXPLICITLY in the article content provided. "
+        f"If a stat is not in the source text, DO NOT include it — omit the claim entirely rather than guess. "
+        f"Never use training knowledge to fill in career stats, goal tallies, or match details not present in the source.\n"
+        f"- MATCH FRAMING — never describe a goal as a 'winner', 'late winner', 'equaliser', or 'opener' unless that framing is stated in the source. Use only the scoreline context above.\n"
         f"- BANNED PHRASES — do NOT use ANY of these words or phrases, not even close variants: {BANNED_PHRASES}\n"
         f"- Write like a sharp human analyst, not an AI assistant. No hype language, no vague gestures at significance. Every sentence earns its place."
     )
