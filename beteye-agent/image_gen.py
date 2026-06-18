@@ -43,7 +43,7 @@ GREY_DIM    = (80,  95, 115)     # #505F73  subdued text
 CARD_W, CARD_H = 1200, 675      # 16:9 — Twitter card standard
 
 # Paths
-LOGO_PATH = Path(__file__).parent.parent / "bet-eye-brand-logo-original-tr-bg.png"
+LOGO_PATH = Path(__file__).parent / "bet-eye-logo-icon-original-tr-bg.png"
 TMP_DIR   = Path(os.environ.get("DATA_DIR", "/data")) / "img_tmp"
 TMP_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -372,137 +372,206 @@ async def match_card(fixtures: list[dict], result: dict | None = None) -> Path:
     return await _multi_match(fixtures)
 
 
+def _panel(img: Image.Image, x1: int, y1: int, x2: int, y2: int,
+           radius: int = 12, fill=(15, 35, 70, 210),
+           border=(160, 185, 215, 190), bw: int = 2) -> None:
+    """Draw a semi-transparent glass panel with metallic border."""
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    d.rounded_rectangle((x1, y1, x2, y2), radius=radius, fill=fill,
+                         outline=border, width=bw)
+    d.line([(x1 + radius, y1 + 2), (x2 - radius, y1 + 2)],
+           fill=(230, 245, 255, 35), width=1)
+    img.alpha_composite(layer)
+
+
+FIFA_CUP_PATH = Path(__file__).parent / "fifa-cup.png"
+_FIFA_CUP_CACHE: Image.Image | None = None
+
+
+def _load_fifa_cup() -> Image.Image | None:
+    """Load and background-remove the FIFA cup PNG (cached after first load)."""
+    global _FIFA_CUP_CACHE
+    if _FIFA_CUP_CACHE is not None:
+        return _FIFA_CUP_CACHE
+    if not FIFA_CUP_PATH.exists():
+        return None
+    try:
+        src = Image.open(FIFA_CUP_PATH).convert("RGBA")
+        px  = src.load()
+        w, h = src.size
+
+        # Flood-fill background removal from all 4 corners (tolerance 40)
+        from collections import deque
+        visited = [[False] * h for _ in range(w)]
+        queue   = deque()
+        tol     = 40
+
+        def _similar(c1, c2):
+            return all(abs(int(c1[i]) - int(c2[i])) <= tol for i in range(3))
+
+        seeds = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+        for sx, sy in seeds:
+            if not visited[sx][sy]:
+                queue.append((sx, sy))
+                visited[sx][sy] = True
+
+        bg_color = px[0, 0]
+        while queue:
+            x, y = queue.popleft()
+            r, g, b, a = px[x, y]
+            px[x, y] = (r, g, b, 0)   # make transparent
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < w and 0 <= ny < h and not visited[nx][ny]:
+                    if _similar(px[nx, ny], bg_color):
+                        visited[nx][ny] = True
+                        queue.append((nx, ny))
+
+        _FIFA_CUP_CACHE = src
+        return src
+    except Exception as e:
+        log.debug(f"FIFA cup load error: {e}")
+        return None
+
+
+def _paste_fifa_cup(img: Image.Image, x: int, y: int, h: int = 100) -> None:
+    """Paste the background-removed FIFA World Cup trophy at (x, y) scaled to height h."""
+    cup = _load_fifa_cup()
+    if cup is None:
+        return
+    try:
+        sw  = int(h * cup.width / cup.height)
+        cup = cup.resize((sw, h), Image.LANCZOS)
+        img.alpha_composite(cup, (x, y))
+    except Exception as e:
+        log.debug(f"FIFA cup paste error: {e}")
+
+
 async def _single_match(fx: dict, result: dict | None = None) -> Path:
-    """
-    Full-width single fixture card.
-    Pre-match: shows VS + kickoff time.
-    Live/post-match: shows bold scoreline when result is provided.
-    result = {"home_goals": int, "away_goals": int, "status": str, "elapsed": int|None}
-    """
     img, draw = _new_card()
 
     home_name = fx.get("home", "Home")
     away_name = fx.get("away", "Away")
-
     has_score = result is not None and result.get("home_goals") is not None
-    is_ft     = result and result.get("status") in ("FT", "AET", "PEN")
-    is_live   = result and result.get("status") in ("1H", "HT", "2H", "ET", "P")
+    is_ft     = bool(result and result.get("status") in ("FT", "AET", "PEN"))
+    is_live   = bool(result and result.get("status") in ("1H", "HT", "2H", "ET", "P"))
 
     # Background glows
-    _glow(img, 250,          330, 420, CYAN_MID, 0.11)
-    _glow(img, CARD_W - 250, 330, 420, CYAN_MID, 0.11)
-    centre_glow = 0.22 if has_score else 0.08
-    _glow(img, CARD_W // 2, 330, 200, CYAN, centre_glow)
+    _glow(img, CARD_W // 2, 300, 520, CYAN_MID, 0.10)
+    _glow(img, CARD_W // 2, CARD_H // 2 + 60, 600, BLUE_DEEP, 0.20)
 
-    # Top band
-    draw.rectangle((0, 0, CARD_W, 70), fill=BLUE_DARK + (255,))
-    label = (f"FIFA WORLD CUP 2026  ·  GROUP {fx.get('group', '?')}"
-             f"  ·  MATCHDAY {fx.get('matchday', '?')}")
-    _text_c(draw, label, 22, F["label"], (*CYAN_MID, 220))
+    # ── TOP BAND ─────────────────────────────────────────────────────────────
+    BAND_H = 72
+    draw.rectangle((0, 0, CARD_W, BAND_H), fill=(18, 26, 44, 255))
+    draw.line([(0, BAND_H), (CARD_W, BAND_H)], fill=(*CYAN, 200), width=2)
 
-    # Status badge top-right
+    # BetEye icon — top left
+    _logo(img, w=72, x=24, y=10, opacity=0.95)
+
+    # Centered band label
+    band_label = (f"FIFA WORLD CUP 2026  •  GROUP {fx.get('group', '?')}"
+                  f"  •  MATCHDAY {fx.get('matchday', '?')}")
+    _text_c(draw, band_label, 26, F["label"], (220, 235, 255))
+
     if is_ft:
-        draw.text((CARD_W - 24, 22), "FULL TIME", font=F["label"],
-                  fill=(*CYAN, 230), anchor="rt")
+        draw.text((CARD_W - 24, 26), "FULL TIME",
+                  font=F["label"], fill=(*CYAN, 245), anchor="rt")
     elif is_live:
         elapsed = result.get("elapsed") or ""
         badge   = f"LIVE  {elapsed}′" if elapsed else "LIVE"
-        draw.text((CARD_W - 24, 22), badge, font=F["label"],
-                  fill=(255, 80, 80, 240), anchor="rt")
+        draw.text((CARD_W - 24, 26), badge,
+                  font=F["label"], fill=(255, 70, 70, 250), anchor="rt")
 
-    draw.line([(0, 70), (CARD_W, 70)], fill=(*CYAN, 160), width=2)
+    # ── FLAGS — large, directly on background ────────────────────────────────
+    flag_w, flag_h = 310, 210
+    flag_y  = BAND_H + 70         # 142
+    flag_cy = flag_y + flag_h // 2 # 247
+    home_cx = 300
+    away_cx = CARD_W - 300
 
-    # Flags
-    flag_w, flag_h = 300, 200
     home_url = TEAM_FLAGS.get(home_name) or fx.get("home_logo", "")
     away_url = TEAM_FLAGS.get(away_name) or fx.get("away_logo", "")
     home_flag, away_flag = await asyncio.gather(
-        _team_logo_rect(home_url, flag_w, flag_h),
-        _team_logo_rect(away_url, flag_w, flag_h),
+        _team_logo_rect(home_url, flag_w, flag_h, radius=14),
+        _team_logo_rect(away_url, flag_w, flag_h, radius=14),
     )
 
-    flag_cy = 300
-    flag_y  = flag_cy - flag_h // 2
-    home_cx = 235
-    away_cx = CARD_W - 235
-
-    for cx in (home_cx, away_cx):
-        _glow(img, cx, flag_cy, 170, CYAN, 0.14)
-        draw.rounded_rectangle(
-            (cx - flag_w // 2 - 4, flag_y - 4,
-             cx + flag_w // 2 + 4, flag_y + flag_h + 4),
-            radius=16, outline=(*CYAN_MID, 100), width=2,
-        )
-
-    for cx, name, flag_img in (
-        (home_cx, home_name, home_flag),
-        (away_cx, away_name, away_flag),
-    ):
+    for cx, flag_img, name in [(home_cx, home_flag, home_name), (away_cx, away_flag, away_name)]:
         x = cx - flag_w // 2
+        draw.rounded_rectangle(
+            (x - 6, flag_y - 6, x + flag_w + 6, flag_y + flag_h + 6),
+            radius=16, outline=(*CYAN_MID, 200), width=4,
+        )
         if flag_img:
             img.alpha_composite(flag_img, (x, flag_y))
         else:
-            fb = _initials_circle(name, flag_h)
-            img.alpha_composite(fb, (cx - flag_h // 2, flag_y))
-        draw.text((cx, flag_y + flag_h + 16), name.upper(),
-                  font=F["sub"], fill=WHITE, anchor="mt")
+            img.alpha_composite(_initials_circle(name, flag_h), (cx - flag_h // 2, flag_y))
+        draw.text((cx, flag_y + flag_h + 20), name.upper(),
+                  font=F["title"], fill=WHITE, anchor="mt")
 
-    # Centre — scoreline or VS
+    # ── CENTRE: VS badge or score ─────────────────────────────────────────────
     cx = CARD_W // 2
+
     if has_score:
-        hg = str(result["home_goals"])
-        ag = str(result["away_goals"])
-        score_y = flag_cy - 62
+        hg, ag = str(result["home_goals"]), str(result["away_goals"])
+        _glow(img, cx, flag_cy, 150, CYAN, 0.35)
+        score_y = flag_cy - 60  # 167
         draw.text((cx - 24, score_y), hg, font=F["hero"], fill=WHITE, anchor="rt")
-        draw.text((cx,      score_y + 10), "—", font=F["big"], fill=CYAN, anchor="mt")
+        draw.text((cx,      score_y + 12), "–", font=F["big"], fill=(*CYAN, 255), anchor="mt")
         draw.text((cx + 24, score_y), ag, font=F["hero"], fill=WHITE, anchor="lt")
 
         if is_ft:
-            pill_text = "FULL TIME"
+            pill_text, pill_col = "FULL TIME", (*CYAN, 235)
         elif result.get("status") == "HT":
-            pill_text = "HALF TIME"
+            pill_text, pill_col = "HALF TIME", (*CYAN, 235)
         else:
             elapsed = result.get("elapsed", "")
             pill_text = f"{elapsed}′  LIVE" if elapsed else "LIVE"
+            pill_col  = (255, 65, 65, 245)
 
-        pill_w = 210
-        pill_x = cx - pill_w // 2
-        pill_y = score_y + 110
-        draw.rounded_rectangle((pill_x, pill_y, pill_x + pill_w, pill_y + 32),
-                                radius=8, fill=BLUE_DARK + (220,),
-                                outline=(*CYAN, 180), width=2)
-        _text_c(draw, pill_text, pill_y + 6, F["tiny"], (*CYAN, 230))
+        pw, ph = 178, 34
+        pill_y = flag_cy + 58  # 285
+        draw.rounded_rectangle(
+            (cx - pw // 2, pill_y, cx + pw // 2, pill_y + ph),
+            radius=9, fill=BLUE_DARK + (230,), outline=pill_col, width=2,
+        )
+        _text_c(draw, pill_text, pill_y + 8, F["tiny"], pill_col)
+
     else:
-        _glow(img, cx, flag_cy, 110, CYAN, 0.30)
-        draw.text((cx, flag_cy - 58), "VS", font=F["hero"], fill=CYAN, anchor="mt")
+        bs = 118
+        _glow(img, cx, flag_cy, 100, CYAN, 0.45)
+        draw.rounded_rectangle(
+            (cx - bs // 2, flag_cy - bs // 2, cx + bs // 2, flag_cy + bs // 2),
+            radius=22, fill=(8, 18, 45, 245), outline=(*CYAN_MID, 230), width=4,
+        )
+        draw.text((cx, flag_cy), "VS", font=F["big"], fill=(*CYAN, 255), anchor="mm")
 
-    # ECG signature
-    ecg_y = 465
-    _ecg(draw, 60, CARD_W - 60, ecg_y, (*CYAN, 210), width=3)
+    # ── INFO STRIP — below team names ────────────────────────────────────────
+    info_y   = flag_y + flag_h + 92   # 424
+    strip_h  = 52
+    kickoff  = fx.get("kickoff_et", "TBD")
+    venue    = fx.get("venue", "")
+    city     = fx.get("city", "")
+    parts    = [f"TODAY  •  {kickoff} ET"]
+    if venue:
+        parts.append(venue)
+    if city:
+        parts.append(city)
+    info_text = "  •  ".join(parts)
+    _panel(img, 100, info_y, CARD_W - 100, info_y + strip_h,
+           radius=10, fill=(8, 22, 55, 220), border=(*CYAN_MID, 100), bw=1)
+    bb     = draw.textbbox((0, 0), info_text, font=F["small"])
+    text_h = bb[3] - bb[1]
+    _text_c(draw, info_text, info_y + (strip_h - text_h) // 2 - bb[1], F["small"], WHITE)
 
-    # Kickoff / venue row (only for pre-match)
-    if not has_score:
-        kickoff = fx.get("kickoff_et", "TBD")
-        city    = fx.get("city", "")
-        venue   = fx.get("venue", "")
-        info    = f"TODAY  ·  {kickoff} ET"
-        if city:
-            info += f"  ·  {city}"
-        _text_c(draw, info, 488, F["body"], GREY)
-        if venue:
-            _text_c(draw, venue, 522, F["small"], GREY_DIM)
+    # ── FIFA CUP + BRANDING — anchored right below the info strip ────────────
+    bottom_y = info_y + strip_h + 28
+    _paste_fifa_cup(img, x=24, y=bottom_y, h=80)
+    draw.text((CARD_W - 32, bottom_y + 28), "@beteye_  •  #WC2026",
+              font=F["small"], fill=(*GREY_DIM, 200), anchor="rt")
 
-    # Bottom bar — logo left, handle right, vertically centred in 75px band
-    bar_y     = 600
-    bar_mid   = bar_y + (CARD_H - bar_y) // 2   # = 637
-    logo_w    = 180
-    draw.rectangle((0, bar_y, CARD_W, CARD_H), fill=BLUE_DARK + (255,))
-    draw.line([(0, bar_y), (CARD_W, bar_y)], fill=(*CYAN, 180), width=2)
-    _logo(img, w=logo_w, x=40, y=bar_mid - 19)  # 19 ≈ half of ~38px logo height
-    draw.text((CARD_W - 48, bar_mid), "@beteye_  ·  #WC2026",
-              font=F["small"], fill=GREY_DIM, anchor="rm")
-
-    slug   = f"{fx.get('home','?')}_{fx.get('away','?')}_{fx.get('date','')}".replace(" ", "_")
+    slug   = f"{home_name}_{away_name}_{fx.get('date', '')}".replace(" ", "_")
     suffix = "_ft" if is_ft else ("_live" if is_live else "")
     out    = TMP_DIR / f"match_{slug}{suffix}.png"
     img.convert("RGB").save(out, "PNG", optimize=True)
@@ -975,19 +1044,11 @@ async def generate_post_image(
             hl = raw_title[:55].rsplit(" ", 1)[0] if len(raw_title) > 55 else raw_title
             return branded_card(mood=mood, headline=hl)
 
-        if mode == "take":
+        if mode in ("take", "breaking"):
             fx = item.get("_fixture")
             if fx:
-                home = fx.get("home", "")
-                away = fx.get("away", "")
-                # Try to find a real celebration/match photo first
-                action = await _search_action_image(home, away)
-                if action:
-                    return action
-                # Fall back to scoreline card
-                from wc_fixtures import fetch_fixture_result
                 result = await fetch_fixture_result(fx.get("fixture_id"))
-                return await _take_card(fx, result=result)
+                return await match_card([fx], result=result)
             return branded_card(mood="intense")
 
         if mode == "list":
