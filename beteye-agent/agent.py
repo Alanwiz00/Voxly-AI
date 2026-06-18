@@ -652,9 +652,11 @@ def _select_mode(item: dict, is_breaking: bool, post_index: int) -> str:
     if _LIST_TITLE_RE.search(item.get("title", "")):
         return "list"
 
-    # Queue posts: only news / take / list — never matchday or stat
-    _QUEUE_MODES   = ["news", "take", "list"]
-    _QUEUE_WEIGHTS = [2,      3,      1]
+    # Queue posts: only news / list — never take/matchday/stat/breaking.
+    # take and breaking require a verified live result from the API; without
+    # _fixture context the LLM will hallucinate scorelines and match stats.
+    _QUEUE_MODES   = ["news", "list"]
+    _QUEUE_WEIGHTS = [4,      1]
 
     intel = _load_intelligence()
     mode_perf: dict = intel.get("mode_performance", {})
@@ -700,7 +702,21 @@ async def _generate_post(item: dict, mode: str = "news") -> str | None:
             fixture_ctx = score_line + "\n" + fixture_ctx
         else:
             live_result = None
+            # take/breaking without a verified result → the LLM will hallucinate
+            # scorelines and match stats. Hard-abort here instead.
+            if mode in ("take", "breaking"):
+                log.warning(
+                    f"[generate] Skipping {mode} post for {specific_fx.get('home')} vs "
+                    f"{specific_fx.get('away')} — no verified result from API yet."
+                )
+                return None
     else:
+        # Queue-based post: no fixture context scoped to a single match.
+        # take/breaking must never run without verified data.
+        if mode in ("take", "breaking"):
+            log.warning(f"[generate] Skipping {mode} post — no _fixture context (queue item). "
+                        "Would hallucinate match stats.")
+            return None
         fixture_ctx  = get_fixture_context_block()
         live_result  = None
     fixture_block = f"\n{fixture_ctx}\n" if fixture_ctx else ""
