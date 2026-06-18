@@ -26,15 +26,15 @@ MARQUEE_TEAMS: frozenset[str] = frozenset({
 
 # Hard daily caps per mode
 MODE_DAILY_CAPS: dict[str, int] = {
-    "matchday": 99,  # one per fixture, uncapped
-    "stat":      1,
-    "take":      2,
-    "breaking":  4,  # one per fixture — fires 1h after match ends
-    "news":      1,
-    "list":      1,
+    "matchday": 4,   # cap at 4 best games per day instead of every fixture
+    "stat":     1,
+    "take":     2,
+    "breaking": 1,   # one breaking post per day — highest-hype match only
+    "news":     1,
+    "list":     1,
 }
 
-DAILY_POST_MAX = 20  # ceiling on any single day
+DAILY_POST_MAX = 8  # hard ceiling — keeps monthly writes well under Basic tier
 
 
 @dataclass
@@ -92,21 +92,40 @@ def build_daily_schedule(
     # a midnight game on June 17 kicks off AFTER a 21:00 game on June 16).
     by_kickoff = sorted(fixtures, key=_kickoff_et)
 
-    # ── 1. Matchday posts — 5h before each kickoff ─────────────────────────
-    for fx in by_kickoff:
-        kickoff  = _kickoff_et(fx)
-        run_at   = kickoff - timedelta(hours=5)
-        label    = f"matchday: {fx['home']} vs {fx['away']}"
-        slot_key = f"matchday_{fx.get('date', today_str)}_{fx['home']}_{fx['away']}"
+    # ── 1. Matchday posts — 5h before kickoff, marquee games first ───────────
+    # Prioritise marquee games; non-marquee games that start within 3h of a
+    # marquee are skipped (they'll appear in a multi-match card instead).
+    # Hard cap: MODE_DAILY_CAPS["matchday"] slots maximum.
+    matchday_count = 0
+    matchday_cap   = MODE_DAILY_CAPS["matchday"]
+    marquee_kickoffs: list[datetime] = [
+        _kickoff_et(f) for f in by_kickoff if is_marquee(f)
+    ]
+
+    for fx in sorted(by_kickoff, key=lambda f: (-_hype_score(f), _kickoff_et(f))):
+        if matchday_count >= matchday_cap:
+            break
+        kickoff = _kickoff_et(fx)
+        run_at  = kickoff - timedelta(hours=5)
 
         if run_at < now:
             if now < kickoff:
-                # Missed window but game hasn't kicked off — post ASAP
                 run_at = now + timedelta(minutes=5)
             else:
-                continue  # game already started/ended — skip entirely
+                continue
 
+        # Skip non-marquee games that kick off within 3h of a marquee game
+        # (saves a slot; the marquee card is more engaging anyway)
+        if not is_marquee(fx):
+            too_close = any(abs((kickoff - mko).total_seconds()) < 10800
+                            for mko in marquee_kickoffs)
+            if too_close:
+                continue
+
+        label    = f"matchday: {fx['home']} vs {fx['away']}"
+        slot_key = f"matchday_{fx.get('date', today_str)}_{fx['home']}_{fx['away']}"
         slots.append(PostSlot(run_at=run_at, mode="matchday", fixture=fx, label=label, slot_key=slot_key))
+        matchday_count += 1
 
     # ── 2. Stat post — 90min before kickoff, single most-hyped marquee game ─
     # Sort marquee fixtures by hype (both teams marquee > one team) then by kickoff.
@@ -150,13 +169,17 @@ def build_daily_schedule(
             slot_key=slot_key,
         ))
 
-    # ── 4. Breaking posts — 1h after each match ends, one per fixture ────────
-    # Fires at kickoff + 110min (match window) + 60min (context accumulation).
-    # During that 60-min buffer the queue collects post-match articles, stats,
-    # and reactions. The breaking slot then picks the best and writes a deep
-    # contextual post grounded in real collected content.
-    for fx in by_kickoff:
-        ko         = _kickoff_et(fx)
+    # ── 4. Breaking post — highest-hype game only, 170min after kickoff ──────
+    # Cap at MODE_DAILY_CAPS["breaking"] (default 1). Pick by hype so the
+    # post-match report goes to the most engaging game, saving write credits.
+    breaking_by_hype = sorted(by_kickoff, key=lambda f: (-_hype_score(f), _kickoff_et(f)))
+    breaking_count   = 0
+    breaking_cap     = MODE_DAILY_CAPS["breaking"]
+
+    for fx in breaking_by_hype:
+        if breaking_count >= breaking_cap:
+            break
+        ko          = _kickoff_et(fx)
         breaking_at = ko + timedelta(minutes=170)
         if breaking_at <= now:
             continue
@@ -169,6 +192,7 @@ def build_daily_schedule(
             label=f"breaking: {fx['home']} vs {fx['away']} post-match report",
             slot_key=slot_key,
         ))
+        breaking_count += 1
 
     # ── 5. News post — 09:30 ET fixed slot ─────────────────────────────────
     news_at = now.replace(hour=9, minute=30, second=0, microsecond=0)

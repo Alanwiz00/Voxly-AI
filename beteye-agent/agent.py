@@ -1322,8 +1322,8 @@ async def check_performance() -> None:
             continue
 
         age_hours = (now - posted_at).total_seconds() / 3600
-        if age_hours < 6:
-            continue  # too soon
+        if age_hours < 24:
+            continue  # wait 24h — metrics settle and we halve read API calls
 
         metrics = get_tweet_metrics(entry["tweet_id"])
         if metrics:
