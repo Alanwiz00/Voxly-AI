@@ -44,7 +44,7 @@ export default function CrawlerPage() {
       setForm({ name: "", keywords: "", description: "" });
       setShowForm(false);
       await load();
-      toast.success("Topic created — crawl & content generation started");
+      toast.success("Topic created. Crawl and content generation started.");
     } catch {
       toast.error("Failed to create topic");
     } finally {
@@ -68,7 +68,7 @@ export default function CrawlerPage() {
       setExpandedId(topic.id);
       const res = await topicsApi.generatedContent(topic.id);
       setContentMap((prev) => ({ ...prev, [topic.id]: res.data }));
-      toast.success(`Crawl complete — fresh content ready`);
+      toast.success("Crawl complete. Fresh content is ready.");
     } catch {
       toast.error("Crawl failed");
     } finally {
@@ -133,7 +133,7 @@ export default function CrawlerPage() {
         <div className="min-w-0">
           <h1 className="text-2xl md:text-3xl font-bold text-foreground">Crawler</h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            Topics are crawled every 6 hours — fresh content is auto-generated after each crawl
+            Topics are crawled every 12 hours. Fresh content is auto-generated after each crawl.
           </p>
         </div>
         <Button onClick={() => setShowForm(!showForm)} className="shrink-0">
@@ -256,7 +256,7 @@ export default function CrawlerPage() {
                     <p className="text-sm text-muted-foreground text-center py-4">Loading generated content…</p>
                   ) : content.length === 0 ? (
                     <p className="text-sm text-muted-foreground text-center py-4">
-                      No content yet — content generates automatically after each crawl.
+                      No content yet. Content generates automatically after each crawl.
                     </p>
                   ) : (
                     <>

@@ -108,7 +108,7 @@ function LoginCard() {
         </div>
         <CardTitle className="text-2xl">VoxlyAI</CardTitle>
         <CardDescription>
-          Your voice, amplified. Create content that sounds like you — across every platform.
+          Your voice, amplified. Create content that sounds like you, across every platform.
         </CardDescription>
       </CardHeader>
 

@@ -144,7 +144,7 @@ function PersonaCard({ persona, onUpdated, onDeleted, onSetDefault }: {
           </div>
         </div>
         <p className="text-xs text-muted-foreground mt-1">
-          {[persona.niche, persona.tone, persona.target_audience].filter(Boolean).join(" · ") || "No details yet — click to edit"}
+          {[persona.niche, persona.tone, persona.target_audience].filter(Boolean).join(" · ") || "No details yet. Click to edit."}
         </p>
       </CardHeader>
 
@@ -250,7 +250,7 @@ export default function SettingsPage() {
         setRevealedKey({ id: record.id, key: record.key });
         setShowKeyValue(false);
       }
-      toast.success("API key created — copy it now, it won't be shown again");
+      toast.success("API key created. Copy it now, it won't be shown again.");
     } catch { toast.error("Failed to create API key"); }
     finally { setCreatingKey(false); }
   };
@@ -379,7 +379,7 @@ export default function SettingsPage() {
           {revealedKey && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 p-3 space-y-2">
               <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
-                Copy your key now — it will never be shown again.
+                Copy your key now. It will never be shown again.
               </p>
               <div className="flex items-center gap-2 bg-white dark:bg-slate-900 rounded-md border px-3 py-2">
                 <code className="flex-1 text-xs font-mono text-slate-800 dark:text-slate-200 break-all select-all">

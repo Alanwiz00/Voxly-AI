@@ -70,7 +70,7 @@ export default function HistoryPage() {
     <div className="p-4 md:p-8 space-y-6">
       <div>
         <h1 className="text-2xl md:text-3xl font-bold text-foreground">Content History</h1>
-        <p className="text-muted-foreground mt-1">All generated content — re-edit any piece with instructions</p>
+        <p className="text-muted-foreground mt-1">All generated content. Re-edit any piece with a plain instruction.</p>
       </div>
 
       {/* Filters */}

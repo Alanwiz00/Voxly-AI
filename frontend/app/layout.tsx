@@ -9,7 +9,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "VoxlyAI",
-  description: "Your voice, amplified. AI-generated content that sounds like you — across every platform.",
+  description: "Your voice, amplified. AI-generated content that sounds like you, across every platform.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
