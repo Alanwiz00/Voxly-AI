@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
-import { LayoutDashboard, Sparkles, Rss, History, Settings, LogOut, ChevronRight } from "lucide-react";
+import { LayoutDashboard, Sparkles, History, Settings, LogOut, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import ThemeToggle from "./theme-toggle";
@@ -10,7 +10,6 @@ import ThemeToggle from "./theme-toggle";
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/generate", label: "Generate", icon: Sparkles },
-  { href: "/topics", label: "Crawler", icon: Rss },
   { href: "/history", label: "History", icon: History },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

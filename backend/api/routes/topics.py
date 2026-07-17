@@ -1,7 +1,7 @@
-from fastapi import APIRouter, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, delete, desc
-from api.deps import CurrentUser, DB
+from api.deps import CurrentUser, AdminUser, DB
 from db.models.topic import Topic, CrawlResult
 from db.models.content import GeneratedContent
 
@@ -42,15 +42,30 @@ async def list_topics(current_user: CurrentUser, db: DB):
     return [TopicResponse.from_orm_ext(t) for t in result.scalars()]
 
 
+TOPIC_LIMIT = 3  # applies to non-admin users only
+
+
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=TopicResponse)
-async def create_topic(body: TopicCreate, current_user: CurrentUser, db: DB, background_tasks: BackgroundTasks):
+async def create_topic(body: TopicCreate, current_user: CurrentUser, db: DB):
+    if not current_user.is_admin:
+        count_result = await db.execute(select(Topic).where(Topic.user_id == current_user.id))
+        if len(count_result.scalars().all()) >= TOPIC_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Free accounts are limited to {TOPIC_LIMIT} topics. Delete one to add another.",
+            )
+
     topic = Topic(user_id=current_user.id, **body.model_dump())
     db.add(topic)
     await db.commit()
     await db.refresh(topic)
 
-    # Trigger initial crawl immediately in background
-    background_tasks.add_task(_trigger_crawl, topic.id, topic.name, topic.keywords, current_user.id)
+    # Queue an immediate crawl via Celery (non-blocking)
+    from workers.crawl_worker import crawl_topic_task
+    crawl_topic_task.apply_async(
+        args=[topic.id, topic.name, topic.keywords, current_user.id],
+        countdown=0,
+    )
     return TopicResponse.from_orm_ext(topic)
 
 
@@ -73,15 +88,40 @@ async def delete_topic(topic_id: int, current_user: CurrentUser, db: DB):
     await db.commit()
 
 
-@router.post("/{topic_id}/crawl")
+@router.post("/{topic_id}/crawl", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_crawl(topic_id: int, current_user: CurrentUser, db: DB):
+    """Queue an immediate crawl for a single topic via Celery."""
     result = await db.execute(select(Topic).where(Topic.id == topic_id, Topic.user_id == current_user.id))
     topic = result.scalar_one_or_none()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
-    from workers.crawl_worker import _crawl_and_store
-    await _crawl_and_store(topic.id, topic.name, topic.keywords, current_user.id)
-    return {"message": "Crawl complete", "topic_id": topic_id}
+    from workers.crawl_worker import crawl_topic_task
+    task = crawl_topic_task.apply_async(
+        args=[topic.id, topic.name, topic.keywords, current_user.id],
+        countdown=0,
+    )
+    return {"queued": True, "task_id": task.id, "topic_id": topic_id}
+
+
+@router.post("/flush", status_code=status.HTTP_202_ACCEPTED)
+async def flush_crawl_queue(admin: AdminUser, db: DB):
+    """
+    Admin: re-queue ALL active topics for immediate crawl, bypassing the
+    normal cooldown. Use this to recover from stuck or failed Celery tasks.
+    """
+    result = await db.execute(select(Topic).where(Topic.is_active == True))
+    topics = result.scalars().all()
+
+    from workers.crawl_worker import crawl_topic_task
+    queued = []
+    for topic in topics:
+        task = crawl_topic_task.apply_async(
+            args=[topic.id, topic.name, topic.keywords, topic.user_id],
+            countdown=0,
+        )
+        queued.append({"topic_id": topic.id, "task_id": task.id})
+
+    return {"queued": len(queued), "topics": queued}
 
 
 @router.get("/{topic_id}/crawl-results")
@@ -137,8 +177,3 @@ def _serialize_content(r: GeneratedContent) -> dict:
         "version": r.version,
         "created_at": r.created_at.isoformat(),
     }
-
-
-async def _trigger_crawl(topic_id: int, topic_name: str, keywords: str | None, user_id: int):
-    from workers.crawl_worker import _crawl_and_store
-    await _crawl_and_store(topic_id, topic_name, keywords, user_id)

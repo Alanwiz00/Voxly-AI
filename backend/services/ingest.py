@@ -6,6 +6,7 @@ import trafilatura
 import pdfplumber
 import docx
 from services.sentiment import get_openai
+from core.config import settings
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 IMAGE_MIME_TYPES = {

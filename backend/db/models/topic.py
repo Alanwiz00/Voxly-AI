@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db.postgres import Base
 
@@ -32,5 +32,22 @@ class CrawlResult(Base):
     crawled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     topic: Mapped["Topic"] = relationship(back_populates="crawl_results")
+
+
+class TopicSentimentCache(Base):
+    """
+    Stores the pre-built enriched sentiment context for a topic after each crawl.
+    Consumed by the generate routes so no OpenAI call is needed at crawl time.
+    Rows expire after 7 days and are purged by a daily Celery Beat task.
+    """
+    __tablename__ = "topic_sentiment_cache"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    topic_id: Mapped[int] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    sentiment_context: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    cached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

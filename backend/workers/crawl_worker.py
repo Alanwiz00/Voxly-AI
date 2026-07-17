@@ -12,13 +12,10 @@ from qdrant_client.models import PointStruct
 
 from core.config import settings
 from db.postgres import AsyncSessionLocal
-from db.models.topic import Topic, CrawlResult
-from db.models.content import GeneratedContent
+from db.models.topic import Topic, CrawlResult, TopicSentimentCache
 from db.qdrant import upsert_points, delete_by_payload
 from services.crawl import crawl_topic
 from services.sentiment import summarize_and_analyze, get_embeddings
-from services.persona import get_best_persona_context
-from services.generator import generate_reusable_ideas, generate_reusable_longform
 
 celery_app = Celery("content_generator", broker=settings.REDIS_URL, backend=settings.REDIS_URL)
 celery_app.conf.update(
@@ -28,11 +25,22 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     broker_connection_retry_on_startup=True,
+    # Prevent zombie tasks: task is only acked after it finishes.
+    # If the worker dies mid-task, the broker re-queues it automatically.
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    # Process one task at a time per worker so queue depth is visible and
+    # a single slow crawl doesn't block others indefinitely.
+    worker_prefetch_multiplier=1,
     beat_schedule={
         "crawl-all-topics": {
             "task": "workers.crawl_worker.crawl_all_active_topics",
             "schedule": timedelta(hours=settings.CRAWL_INTERVAL_HOURS),
-        }
+        },
+        "purge-sentiment-cache": {
+            "task": "workers.crawl_worker.purge_stale_sentiment_cache",
+            "schedule": timedelta(hours=24),
+        },
     },
 )
 
@@ -41,12 +49,19 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-@celery_app.task(name="workers.crawl_worker.crawl_topic_task", bind=True, max_retries=3)
+@celery_app.task(
+    name="workers.crawl_worker.crawl_topic_task",
+    bind=True,
+    max_retries=5,
+    acks_late=True,
+)
 def crawl_topic_task(self, topic_id: int, topic_name: str, keywords: str | None, user_id: int):
     try:
         _run(_crawl_and_store(topic_id, topic_name, keywords, user_id))
     except Exception as exc:
-        raise self.retry(exc=exc, countdown=60)
+        # Exponential backoff: 60s → 120s → 240s → 480s → 960s
+        delay = 60 * (2 ** self.request.retries)
+        raise self.retry(exc=exc, countdown=delay)
 
 
 @celery_app.task(
@@ -59,6 +74,22 @@ def crawl_all_active_topics(self):
         _run(_dispatch_all_topics())
     except Exception as exc:
         raise self.retry(exc=exc, countdown=300)
+
+
+@celery_app.task(name="workers.crawl_worker.purge_stale_sentiment_cache")
+def purge_stale_sentiment_cache():
+    _run(_do_purge_cache())
+
+
+async def _do_purge_cache():
+    from sqlalchemy import delete
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            delete(TopicSentimentCache).where(
+                TopicSentimentCache.expires_at < datetime.now(timezone.utc)
+            )
+        )
+        await db.commit()
 
 
 async def _dispatch_all_topics():
@@ -170,8 +201,8 @@ async def _crawl_and_store(topic_id: int, topic_name: str, keywords: str | None,
         db.add_all(crawl_records)
         await db.commit()
 
-    # Auto-generate reusable content using enriched source data
-    await _generate_reusable_for_topic(topic_id, topic_name, user_id, enriched)
+    # Cache the enriched sentiment context for on-demand generation (no OpenAI call at crawl time)
+    await _save_sentiment_cache(topic_id, enriched)
 
 
 def _build_sentiment_context(enriched: list[dict]) -> str:
@@ -187,61 +218,19 @@ def _build_sentiment_context(enriched: list[dict]) -> str:
         else:
             fact_lines = "(no specific statistics or figures found in this source)"
         parts.append(
-            f"[{e['date']}] [{e['sentiment']}] {e['source'].upper()} — {e['url']}\n"
+            f"[{e['date']}] [{e['sentiment']}] {e['source'].upper()} | {e['url']}\n"
             f"  Summary: {e['summary']}\n"
             f"  Verified facts from source:\n    {fact_lines}"
         )
     return "\n\n".join(parts)
 
 
-async def _generate_reusable_for_topic(
-    topic_id: int,
-    topic_name: str,
-    user_id: int,
-    enriched: list[dict],
-):
-    sentiment_context = _build_sentiment_context(enriched)
-    persona_context = await get_best_persona_context(user_id, topic_name)
-
-    ideas = await generate_reusable_ideas(
-        topic=topic_name,
-        persona_context=persona_context,
-        sentiment_context=sentiment_context,
-    )
-    longform = await generate_reusable_longform(
-        topic=topic_name,
-        persona_context=persona_context,
-        sentiment_context=sentiment_context,
-    )
-
+async def _save_sentiment_cache(topic_id: int, enriched: list[dict]) -> None:
+    """Persist the enriched sentiment context for this topic so generators can use it on demand."""
+    from sqlalchemy import delete
+    context = _build_sentiment_context(enriched)
+    expires = datetime.now(timezone.utc) + timedelta(days=7)
     async with AsyncSessionLocal() as db:
-        from sqlalchemy import delete as sa_delete
-        # Remove stale auto-generated content for this topic before inserting fresh
-        await db.execute(
-            sa_delete(GeneratedContent).where(
-                GeneratedContent.topic_id == topic_id,
-                GeneratedContent.platform == "general",
-            )
-        )
-        for f in ideas:
-            db.add(GeneratedContent(
-                user_id=user_id,
-                topic_id=topic_id,
-                platform="general",
-                content_type="idea",
-                title=f.meta.get("title", ""),
-                content=f.body,
-                meta=f.meta,
-                version=1,
-            ))
-        db.add(GeneratedContent(
-            user_id=user_id,
-            topic_id=topic_id,
-            platform="general",
-            content_type="long_form",
-            title=longform.meta.get("title", ""),
-            content=longform.body,
-            meta=longform.meta,
-            version=1,
-        ))
+        await db.execute(delete(TopicSentimentCache).where(TopicSentimentCache.topic_id == topic_id))
+        db.add(TopicSentimentCache(topic_id=topic_id, sentiment_context=context, expires_at=expires))
         await db.commit()

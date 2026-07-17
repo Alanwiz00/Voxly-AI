@@ -14,7 +14,7 @@ class Base(DeclarativeBase):
 # (e.g. "User" in Topic.user) resolve in any process that imports this module.
 import db.models.user  # noqa: E402, F401
 import db.models.persona  # noqa: E402, F401
-import db.models.topic  # noqa: E402, F401
+import db.models.topic  # noqa: E402, F401  (also registers TopicSentimentCache)
 import db.models.content  # noqa: E402, F401
 import db.models.api_key  # noqa: E402, F401
 

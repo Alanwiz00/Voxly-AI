@@ -33,8 +33,14 @@ def sanitize_body(text: str) -> str:
     text = _EXCESS_NEWLINES.sub('\n\n', text)
     return text.strip()
 
+# Per-content-type character limits for Twitter (X Premium)
+TWITTER_LIMITS = {
+    "idea": 800,
+    "long_form": 2500,
+    "article": 3000,
+}
+
 PLATFORM_LIMITS = {
-    "twitter": 280,
     "instagram": 2200,
     "facebook": 63206,
     "telegram": 4096,
@@ -80,11 +86,10 @@ def format_for_twitter(content: str, content_type: str) -> FormattedContent:
             body=content,
             meta={"tweet_count": len(tweets), "tweets": tweets},
         )
-    if content_type in LONG_FORM_TYPES:
-        return FormattedContent(platform="twitter", content_type=content_type, body=content, meta={})
-    # Short idea — truncate to single tweet
-    body = content[:277] + "..." if len(content) > 280 else content
-    return FormattedContent(platform="twitter", content_type="idea", body=body, meta={})
+    limit = TWITTER_LIMITS.get(content_type)
+    if limit and len(content) > limit:
+        content = content[:limit - 3] + "..."
+    return FormattedContent(platform="twitter", content_type=content_type, body=content, meta={})
 
 
 def format_for_instagram(content: str, content_type: str, hashtags: list[str] | None = None) -> FormattedContent:

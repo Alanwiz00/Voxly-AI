@@ -11,8 +11,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { contentApi, type GeneratedContent, type Platform, type ContentType } from "@/lib/api";
 import { PLATFORM_LABELS, PLATFORM_COLORS, CONTENT_TYPE_LABELS, cn } from "@/lib/utils";
 
+const SELECT_CLS =
+  "h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring";
+
 export default function HistoryPage() {
   const [items, setItems] = useState<GeneratedContent[]>([]);
+  const [loading, setLoading] = useState(true);
   const [platformFilter, setPlatformFilter] = useState<Platform | "">("");
   const [typeFilter, setTypeFilter] = useState<ContentType | "">("");
   const [copied, setCopied] = useState<number | null>(null);
@@ -22,10 +26,13 @@ export default function HistoryPage() {
   const [editLoading, setEditLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  const load = () =>
+  const load = () => {
+    setLoading(true);
     contentApi
       .list({ platform: platformFilter || undefined, content_type: typeFilter || undefined, limit: 50 })
-      .then((r) => setItems(r.data));
+      .then((r) => setItems(r.data))
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => { load(); }, [platformFilter, typeFilter]);
 
@@ -78,7 +85,7 @@ export default function HistoryPage() {
         <select
           value={platformFilter}
           onChange={(e) => setPlatformFilter(e.target.value as Platform | "")}
-          className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className={SELECT_CLS}
         >
           <option value="">All Platforms</option>
           {(["twitter", "instagram", "facebook", "telegram"] as Platform[]).map((p) => (
@@ -88,7 +95,7 @@ export default function HistoryPage() {
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value as ContentType | "")}
-          className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className={SELECT_CLS}
         >
           <option value="">All Types</option>
           {(["idea", "long_form", "thread", "article"] as ContentType[]).map((t) => (
@@ -98,85 +105,108 @@ export default function HistoryPage() {
       </div>
 
       <div className="space-y-3">
-        {items.length === 0 && (
+        {loading ? (
+          [...Array(3)].map((_, i) => (
+            <Card key={i}>
+              <CardHeader className="pb-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 space-y-2">
+                    <div className="flex gap-2">
+                      <div className="h-5 w-16 bg-muted rounded animate-pulse" />
+                      <div className="h-5 w-14 bg-muted rounded animate-pulse" />
+                    </div>
+                    <div className="h-4 w-48 bg-muted rounded animate-pulse" />
+                    <div className="h-3 w-32 bg-muted rounded animate-pulse" />
+                  </div>
+                  <div className="flex gap-1">
+                    {[...Array(4)].map((_, j) => (
+                      <div key={j} className="h-8 w-8 bg-muted rounded animate-pulse" />
+                    ))}
+                  </div>
+                </div>
+              </CardHeader>
+            </Card>
+          ))
+        ) : items.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground">
               No content yet. Head to <strong>Generate</strong> to create your first post.
             </CardContent>
           </Card>
-        )}
-
-        {items.map((item) => (
-          <Card key={item.id}>
-            <CardHeader className="pb-2">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge className={PLATFORM_COLORS[item.platform]}>{PLATFORM_LABELS[item.platform]}</Badge>
-                    <Badge variant="outline">{CONTENT_TYPE_LABELS[item.content_type]}</Badge>
-                    {item.version > 1 && <Badge variant="secondary">v{item.version}</Badge>}
-                    {item.parent_id && <Badge variant="outline" className="text-indigo-600">Re-edit</Badge>}
+        ) : (
+          items.map((item) => (
+            <Card key={item.id}>
+              <CardHeader className="pb-2">
+                {/* Info + actions: stacked on mobile, side-by-side on sm+ */}
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge className={PLATFORM_COLORS[item.platform]}>{PLATFORM_LABELS[item.platform]}</Badge>
+                      <Badge variant="outline">{CONTENT_TYPE_LABELS[item.content_type]}</Badge>
+                      {item.version > 1 && <Badge variant="secondary">v{item.version}</Badge>}
+                      {item.parent_id && <Badge variant="outline" className="text-indigo-600 dark:text-indigo-400">Re-edit</Badge>}
+                    </div>
+                    {item.title && <p className="font-medium mt-1 truncate text-foreground">{item.title}</p>}
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {new Date(item.created_at).toLocaleString()}
+                    </p>
                   </div>
-                  {item.title && <p className="font-medium mt-1 truncate text-foreground">{item.title}</p>}
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {new Date(item.created_at).toLocaleString()}
-                  </p>
-                </div>
-                <div className="flex gap-1 shrink-0 items-center">
-                  <RatingButtons
-                    contentId={item.id}
-                    rating={ratings[item.id] ?? item.rating}
-                    onRate={handleRate}
-                  />
-                  <Button variant="ghost" size="icon" onClick={() => copy(item.id, item.content)}>
-                    {copied === item.id ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => { setEditingId(editingId === item.id ? null : item.id); setEditInstruction(""); }}
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}>
-                    {expandedId === item.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => remove(item.id)}>
-                    <Trash2 className="w-4 h-4 text-destructive" />
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-
-            {expandedId === item.id && (
-              <CardContent className="pt-0">
-                <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed text-foreground bg-muted/50 rounded-md p-4">
-                  {item.content}
-                </pre>
-              </CardContent>
-            )}
-
-            {editingId === item.id && (
-              <CardContent className="pt-0 border-t">
-                <div className="space-y-2 pt-3">
-                  <p className="text-sm font-medium">Re-edit instruction</p>
-                  <Textarea
-                    placeholder="e.g. Make it shorter and more casual, add a CTA at the end..."
-                    rows={2}
-                    value={editInstruction}
-                    onChange={(e) => setEditInstruction(e.target.value)}
-                  />
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => reEdit(item)} disabled={editLoading || !editInstruction.trim()}>
-                      {editLoading ? "Editing..." : "Apply Edit"}
+                  <div className="flex gap-1 items-center self-start sm:self-auto flex-shrink-0">
+                    <RatingButtons
+                      contentId={item.id}
+                      rating={ratings[item.id] ?? item.rating}
+                      onRate={handleRate}
+                    />
+                    <Button variant="ghost" size="icon" onClick={() => copy(item.id, item.content)}>
+                      {copied === item.id ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => { setEditingId(editingId === item.id ? null : item.id); setEditInstruction(""); }}
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}>
+                      {expandedId === item.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </Button>
+                    <Button variant="ghost" size="icon" onClick={() => remove(item.id)}>
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                    </Button>
                   </div>
                 </div>
-              </CardContent>
-            )}
-          </Card>
-        ))}
+              </CardHeader>
+
+              {expandedId === item.id && (
+                <CardContent className="pt-0">
+                  <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed text-foreground bg-muted/50 rounded-md p-4">
+                    {item.content}
+                  </pre>
+                </CardContent>
+              )}
+
+              {editingId === item.id && (
+                <CardContent className="pt-0 border-t">
+                  <div className="space-y-2 pt-3">
+                    <p className="text-sm font-medium">Re-edit instruction</p>
+                    <Textarea
+                      placeholder="e.g. Make it shorter and more casual, add a CTA at the end..."
+                      rows={2}
+                      value={editInstruction}
+                      onChange={(e) => setEditInstruction(e.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => reEdit(item)} disabled={editLoading || !editInstruction.trim()}>
+                        {editLoading ? "Editing..." : "Apply Edit"}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
+                    </div>
+                  </div>
+                </CardContent>
+              )}
+            </Card>
+          ))
+        )}
       </div>
     </div>
   );

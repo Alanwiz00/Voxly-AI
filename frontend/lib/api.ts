@@ -77,6 +77,7 @@ export const topicsApi = {
   update: (id: number, data: Partial<Topic>) => api.patch<Topic>(`/topics/${id}`, data),
   delete: (id: number) => api.delete(`/topics/${id}`),
   crawl: (id: number) => api.post(`/topics/${id}/crawl`),
+  flushQueue: () => api.post("/topics/flush"),
   crawlResults: (id: number) => api.get(`/topics/${id}/crawl-results`),
   generatedContent: (id: number) => api.get<GeneratedContent[]>(`/topics/${id}/content`),
 };
@@ -88,7 +89,6 @@ export const generateApi = {
     topic_name?: string;
     platform: Platform;
     content_type: ContentType;
-    idea_count?: number;
     persona_id?: number;
   }) => api.post<{ content_type: ContentType; results: GeneratedContent[] }>("/generate/", data),
   fromSource: (form: FormData) =>

@@ -1,9 +1,11 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from sqlalchemy import select
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 from api.deps import CurrentUser, DB
-from db.models.topic import Topic
+from db.models.topic import Topic, TopicSentimentCache
 from db.models.persona import PersonaProfile
 from db.models.content import GeneratedContent
 from db.qdrant import search_points
@@ -24,13 +26,29 @@ class GenerateRequest(BaseModel):
     topic_name: str | None = None  # free-form if no saved topic
     platform: str
     content_type: str  # idea | long_form | thread | article
-    idea_count: int = 4  # only for content_type=idea
     persona_id: int | None = None  # explicit override; None = auto-select via Qdrant
 
 
-async def _get_sentiment_context(topic_id: int | None, topic_name: str, user_id: int) -> str:
+async def _get_sentiment_context(topic_id: int | None, topic_name: str, user_id: int, db) -> str:
+    """
+    Read the enriched sentiment context from the cache table (written after each crawl).
+    Falls back to a lightweight Qdrant query if the cache is missing or expired.
+    """
     if not topic_id:
         return ""
+
+    # Primary: cache table (full enriched context with key_facts and dates)
+    row = await db.execute(
+        select(TopicSentimentCache).where(
+            TopicSentimentCache.topic_id == topic_id,
+            TopicSentimentCache.expires_at > datetime.now(timezone.utc),
+        )
+    )
+    cached = row.scalar_one_or_none()
+    if cached:
+        return cached.sentiment_context
+
+    # Fallback: Qdrant (minimal, for topics not yet crawled under the new system)
     query_emb = (await get_embeddings([topic_name]))[0]
     results = await search_points(
         settings.SENTIMENT_COLLECTION,
@@ -43,8 +61,11 @@ async def _get_sentiment_context(topic_id: int | None, topic_name: str, user_id:
     lines = []
     for r in results:
         p = r["payload"]
-        lines.append(f"- [{p.get('sentiment', 'neutral')}] {p.get('summary', '')} (source: {p.get('url', '')})")
-    return "\n".join(lines)
+        lines.append(
+            f"[{p.get('article_date', 'date unknown')}] [{p.get('sentiment', 'neutral')}] {p.get('url', '')}\n"
+            f"  Summary: {p.get('summary', '')}"
+        )
+    return "\n\n".join(lines)
 
 
 @router.post("/")
@@ -68,7 +89,7 @@ async def generate(body: GenerateRequest, current_user: CurrentUser, db: DB):
         persona_context = await get_persona_context_by_id(body.persona_id, topic_name)
     else:
         persona_context = await get_best_persona_context(current_user.id, topic_name)
-    sentiment_context = await _get_sentiment_context(topic_id, topic_name, current_user.id)
+    sentiment_context = await _get_sentiment_context(topic_id, topic_name, current_user.id, db)
 
     if body.content_type == "idea":
         formatted_list = await generate_post_ideas(
@@ -76,7 +97,7 @@ async def generate(body: GenerateRequest, current_user: CurrentUser, db: DB):
             platform=body.platform,
             persona_context=persona_context,
             sentiment_context=sentiment_context,
-            count=body.idea_count,
+            count=3,
         )
         records = []
         for f in formatted_list:
@@ -130,7 +151,6 @@ async def generate_from_source(
     text: str | None = Form(None),
     url: str | None = Form(None),
     file: UploadFile | None = File(None),
-    idea_count: int = Form(4),
     persona_id: int | None = Form(None),
 ):
     file_bytes = await file.read() if file else None
@@ -163,7 +183,7 @@ async def generate_from_source(
             platform=platform,
             persona_context=persona_context,
             sentiment_context=f"Reference content:\n{source_text[:2000]}",
-            count=idea_count,
+            count=3,
         )
         records = []
         for f in formatted_list:

@@ -1,10 +1,12 @@
 "use client";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useTheme } from "@/components/theme-provider";
+
+const IS_DEV = process.env.NODE_ENV === "development";
 
 declare global {
   interface Window {
@@ -34,9 +36,27 @@ const ERROR_MESSAGES: Record<string, { title: string; body: string }> = {
 
 function LoginCard() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const error = searchParams.get("error");
   const errorInfo = error ? (ERROR_MESSAGES[error] ?? ERROR_MESSAGES.Default) : null;
   const { resolvedTheme } = useTheme();
+
+  const [devEmail, setDevEmail] = useState("");
+  const [devLoading, setDevLoading] = useState(false);
+
+  const handleDevLogin = async () => {
+    if (!devEmail.trim() || devLoading) return;
+    setDevLoading(true);
+    const res = await signIn("dev-credentials", {
+      email: devEmail.trim(),
+      redirect: false,
+    });
+    if (res?.ok) {
+      router.push("/dashboard");
+    } else {
+      setDevLoading(false);
+    }
+  };
 
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
@@ -117,6 +137,31 @@ function LoginCard() {
           <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-center">
             <p className="font-medium text-red-700 dark:text-red-400">{errorInfo.title}</p>
             <p className="mt-0.5 text-red-600 dark:text-red-500">{errorInfo.body}</p>
+          </div>
+        )}
+
+        {/* Dev-only shortcut — dead code in production builds */}
+        {IS_DEV && (
+          <div className="rounded-lg border border-dashed border-amber-400 bg-amber-50 dark:bg-amber-950/20 p-3 space-y-2">
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-400 text-center">
+              Dev mode — sign in with any email
+            </p>
+            <input
+              type="email"
+              placeholder="you@example.com"
+              value={devEmail}
+              onChange={(e) => setDevEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleDevLogin()}
+              className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              autoFocus
+            />
+            <Button
+              className="w-full bg-amber-500 hover:bg-amber-600 text-white"
+              onClick={handleDevLogin}
+              disabled={!devEmail.trim() || devLoading}
+            >
+              {devLoading ? "Signing in..." : "Dev Sign In"}
+            </Button>
           </div>
         )}
 

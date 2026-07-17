@@ -27,15 +27,16 @@ export default function GeneratePage() {
   const [textInput, setTextInput] = useState("");
   const [urlInput, setUrlInput] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [ideaCount, setIdeaCount] = useState(4);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<GeneratedContent[]>([]);
   const [copied, setCopied] = useState<number | null>(null);
   const [ratings, setRatings] = useState<Record<number, number | null>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [loadingTopics, setLoadingTopics] = useState(true);
+
   useEffect(() => {
-    topicsApi.list().then((r) => setTopics(r.data));
+    topicsApi.list().then((r) => setTopics(r.data)).finally(() => setLoadingTopics(false));
     personaApi.list().then((r) => {
       setPersonas(r.data);
       const def = r.data.find((p) => p.is_default);
@@ -69,7 +70,6 @@ export default function GeneratePage() {
           topic_name: !selectedTopic ? customTopicName : undefined,
           platform,
           content_type: contentType,
-          idea_count: ideaCount,
           persona_id: selectedPersonaId || undefined,
         });
         setResults(res.data.results);
@@ -77,7 +77,6 @@ export default function GeneratePage() {
         const form = new FormData();
         form.append("platform", platform);
         form.append("content_type", contentType);
-        form.append("idea_count", String(ideaCount));
         if (sourceMode === "text") form.append("text", textInput);
         if (sourceMode === "url") form.append("url", urlInput);
         if (sourceMode === "file" && file) form.append("file", file);
@@ -146,19 +145,6 @@ export default function GeneratePage() {
                   {CONTENT_TYPE_LABELS[ct]}
                 </button>
               ))}
-              {contentType === "idea" && (
-                <div className="pt-1">
-                  <label className="text-xs text-muted-foreground">Number of ideas</label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={8}
-                    value={ideaCount}
-                    onChange={(e) => setIdeaCount(Number(e.target.value))}
-                    className="mt-1 h-8"
-                  />
-                </div>
-              )}
             </CardContent>
           </Card>
 
@@ -215,13 +201,18 @@ export default function GeneratePage() {
               {sourceMode === "topic" && (
                 <div className="space-y-3">
                   <div className="space-y-2">
-                    {topics.map((t) => (
+                    {loadingTopics ? (
+                      [...Array(2)].map((_, i) => (
+                        <div key={i} className="h-14 rounded-lg border bg-muted/40 animate-pulse" />
+                      ))
+                    ) : null}
+                    {!loadingTopics && topics.map((t) => (
                       <button
                         key={t.id}
                         onClick={() => setSelectedTopic(selectedTopic === t.id ? null : t.id)}
                         className={cn(
                           "w-full text-left px-4 py-3 rounded-lg border transition-colors",
-                          selectedTopic === t.id ? "border-indigo-500 bg-indigo-50" : "border-border hover:bg-accent"
+                          selectedTopic === t.id ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300" : "border-border hover:bg-accent"
                         )}
                       >
                         <span className="font-medium text-sm">{t.name}</span>
@@ -232,13 +223,14 @@ export default function GeneratePage() {
                         )}
                       </button>
                     ))}
+
                   </div>
                   <div className="relative">
                     <div className="absolute inset-0 flex items-center">
                       <span className="w-full border-t" />
                     </div>
                     <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-white px-2 text-muted-foreground">or type a topic</span>
+                      <span className="bg-card px-2 text-muted-foreground">or type a topic</span>
                     </div>
                   </div>
                   <Input
@@ -321,10 +313,12 @@ export default function GeneratePage() {
             </CardContent>
           </Card>
 
-          <Button className="w-full" size="lg" onClick={generate} disabled={loading || !canGenerate}>
-            <Sparkles className="w-4 h-4 mr-2" />
-            {loading ? "Generating..." : "Generate Content"}
-          </Button>
+          <div className="sticky bottom-0 pb-2 pt-1 bg-background/95 backdrop-blur-sm">
+            <Button className="w-full" size="lg" onClick={generate} disabled={loading || !canGenerate}>
+              <Sparkles className="w-4 h-4 mr-2" />
+              {loading ? "Generating..." : "Generate Content"}
+            </Button>
+          </div>
         </div>
       </div>
 

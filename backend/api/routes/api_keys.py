@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
-from api.deps import AdminUser, DB
+from api.deps import CurrentUser, DB
 from db.models.api_key import ApiKey
 
 router = APIRouter(prefix="/api-keys", tags=["api-keys"])
@@ -47,11 +47,11 @@ def _serialize(k: ApiKey, full_key: str | None = None) -> ApiKeyResponse:
 
 
 @router.post("/", response_model=ApiKeyResponse, status_code=201)
-async def create_api_key(body: CreateKeyRequest, admin: AdminUser, db: DB):
-    """Create a new API key (admin only). The full key is returned once — store it securely."""
+async def create_api_key(body: CreateKeyRequest, current_user: CurrentUser, db: DB):
+    """Create a new API key. The full key is returned once — store it securely."""
     full_key, key_hash, key_prefix = _generate_key()
     record = ApiKey(
-        user_id=admin.id,
+        user_id=current_user.id,
         name=body.name,
         key_hash=key_hash,
         key_prefix=key_prefix,
@@ -63,21 +63,21 @@ async def create_api_key(body: CreateKeyRequest, admin: AdminUser, db: DB):
 
 
 @router.get("/", response_model=list[ApiKeyResponse])
-async def list_api_keys(admin: AdminUser, db: DB):
-    """List all API keys belonging to the admin (prefixes only, never full keys)."""
+async def list_api_keys(current_user: CurrentUser, db: DB):
+    """List all API keys belonging to the current user (prefixes only, never full keys)."""
     result = await db.execute(
         select(ApiKey)
-        .where(ApiKey.user_id == admin.id)
+        .where(ApiKey.user_id == current_user.id)
         .order_by(ApiKey.created_at.desc())
     )
     return [_serialize(k) for k in result.scalars().all()]
 
 
 @router.delete("/{key_id}", status_code=204)
-async def revoke_api_key(key_id: int, admin: AdminUser, db: DB):
-    """Permanently revoke an API key (admin only)."""
+async def revoke_api_key(key_id: int, current_user: CurrentUser, db: DB):
+    """Permanently revoke an API key."""
     result = await db.execute(
-        select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == admin.id)
+        select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == current_user.id)
     )
     record = result.scalar_one_or_none()
     if not record:

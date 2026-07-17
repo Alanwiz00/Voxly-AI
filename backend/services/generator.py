@@ -6,7 +6,9 @@ from services.formatter import format_content, sanitize_body, FormattedContent
 
 PLATFORM_INSTRUCTIONS = {
     "twitter": (
-        "Twitter/X (X Premium — long posts supported). "
+        "Twitter/X (X Premium). "
+        "Post ideas: aim for 400-800 characters — substantive but focused, not a wall of text. "
+        "Long-form: up to 2,500 characters. Articles: up to 3,000 characters. "
         "Follow the FORMAT TEMPLATE in the task exactly — structure, line breaks, and length. "
         "Every fact must be traceable to the source material. No invented context. "
         "Plain text only — no emojis, no hashtags, no markdown symbols like * or **. "
@@ -96,7 +98,7 @@ async def generate_post_ideas(
     platform: str,
     persona_context: str,
     sentiment_context: str,
-    count: int = 4,
+    count: int = 3,
 ) -> list[dict]:
     system = _build_system_prompt(platform, persona_context)
     user_msg = (
