@@ -4,6 +4,35 @@ from dataclasses import dataclass
 # Character limits only apply to short posts (content_type="idea")
 LONG_FORM_TYPES = {"long_form", "thread", "article"}
 
+# Characters that make AI content feel robotic — replace with natural equivalents
+_EM_DASH_SPACED   = re.compile(r'\s*—\s*')   # em-dash (with or without surrounding spaces)
+_EN_DASH_SPACED   = re.compile(r'\s*–\s*')   # en-dash
+_DOUBLE_HYPHEN    = re.compile(r'--+')        # double/triple hyphen
+_ELLIPSIS_CHAR    = re.compile(r'…')          # unicode ellipsis → three dots
+_CURLY_OPEN_DBL   = re.compile(r'[“„]')   # " " → "
+_CURLY_CLOSE_DBL  = re.compile(r'[”‟]')   # " " → "
+_CURLY_OPEN_SGL   = re.compile(r'[‘‚]')   # ' ‚ → '
+_CURLY_CLOSE_SGL  = re.compile(r'[’‛]')   # ' ‛ → '
+_MARKDOWN_BOLD    = re.compile(r'\*\*(.+?)\*\*')     # **text** → text
+_MARKDOWN_ITALIC  = re.compile(r'\*(.+?)\*')         # *text* → text
+_EXCESS_NEWLINES  = re.compile(r'\n{3,}')            # 3+ newlines → 2
+
+
+def sanitize_body(text: str) -> str:
+    """Strip AI-isms: em-dashes, curly quotes, markdown bold/italic, excess whitespace."""
+    text = _EM_DASH_SPACED.sub(', ', text)
+    text = _EN_DASH_SPACED.sub(', ', text)
+    text = _DOUBLE_HYPHEN.sub('-', text)
+    text = _ELLIPSIS_CHAR.sub('...', text)
+    text = _CURLY_OPEN_DBL.sub('"', text)
+    text = _CURLY_CLOSE_DBL.sub('"', text)
+    text = _CURLY_OPEN_SGL.sub("'", text)
+    text = _CURLY_CLOSE_SGL.sub("'", text)
+    text = _MARKDOWN_BOLD.sub(r'\1', text)
+    text = _MARKDOWN_ITALIC.sub(r'\1', text)
+    text = _EXCESS_NEWLINES.sub('\n\n', text)
+    return text.strip()
+
 PLATFORM_LIMITS = {
     "twitter": 280,
     "instagram": 2200,
@@ -89,6 +118,7 @@ def format_content(
     content_type: str,
     hashtags: list[str] | None = None,
 ) -> FormattedContent:
+    content = sanitize_body(content)
     dispatch = {
         "twitter": lambda: format_for_twitter(content, content_type),
         "instagram": lambda: format_for_instagram(content, content_type, hashtags),

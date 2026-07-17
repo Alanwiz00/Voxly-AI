@@ -21,8 +21,15 @@ class Settings(BaseSettings):
     # e.g. ADMIN_EMAILS=you@gmail.com,colleague@gmail.com
     ADMIN_EMAILS: str = ""
 
-    # Crawl schedule — every N hours
-    CRAWL_INTERVAL_HOURS: int = 6
+    # Optional: NewsAPI key for authoritative news crawling (https://newsapi.org)
+    NEWS_API_KEY: str = ""
+
+    # Crawl schedule — every N hours (12h default; override via env var)
+    CRAWL_INTERVAL_HOURS: int = 12
+
+    # Batch dispatch: topics per batch and seconds between batches
+    CRAWL_BATCH_SIZE: int = 5
+    CRAWL_BATCH_GAP_SECS: int = 600   # 10 minutes between batches
 
     # Qdrant collection names
     PERSONA_COLLECTION: str = "user_personas"

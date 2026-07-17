@@ -2,7 +2,7 @@ import json
 from openai import AsyncOpenAI
 from core.config import settings
 from services.sentiment import get_openai
-from services.formatter import format_content, FormattedContent
+from services.formatter import format_content, sanitize_body, FormattedContent
 
 PLATFORM_INSTRUCTIONS = {
     "twitter": (
@@ -54,6 +54,14 @@ CONTENT_TYPE_INSTRUCTIONS = {
 }
 
 
+_NO_SOURCE_FALLBACK = (
+    "No verified source data available. Write about established principles and well-known "
+    "fundamentals only. Do NOT invent or estimate statistics, percentages, specific dates, "
+    "revenue figures, or projections. Use hedging language for any uncertain claims "
+    "(e.g., 'analysts broadly note', 'industry consensus holds')."
+)
+
+
 def _build_system_prompt(platform: str, persona_context: str) -> str:
     platform_info = PLATFORM_INSTRUCTIONS.get(platform, "a social media platform")
     persona_block = f"\n\nUser's content persona:\n{persona_context}" if persona_context else ""
@@ -63,10 +71,23 @@ def _build_system_prompt(platform: str, persona_context: str) -> str:
         "Rules:\n"
         "- Match the user's established voice, tone, and niche exactly\n"
         "- Never use filler phrases like 'In today's world', 'It's important to note', or 'Dive into'\n"
-        "- Be specific — use numbers, examples, and concrete details over vague claims\n"
+        "- Be specific — cite numbers and examples from the SOURCE MATERIAL provided; never invent them\n"
         "- Write like a human, not a marketing bot\n"
-        "- No emojis on Twitter/X. On other platforms use at most 1-2 only when they add real meaning — never as decoration\n"
-        "- Always return valid JSON as instructed"
+        "- No emojis on Twitter/X. On other platforms use at most 1-2 only when they add real meaning\n"
+        "- Always return valid JSON as instructed\n\n"
+        "ACCURACY RULES — never break these:\n"
+        "- Every specific statistic, percentage, date, or figure must come from the SOURCE MATERIAL\n"
+        "- If source material has no specific data, use hedging language — never state a bare figure\n"
+        "- Do not invent timelines, projections, or outcomes\n"
+        "- Temporal claims ('this year', 'recently', 'last quarter') must reference a date from the sources\n"
+        "- Clearly signal analysis vs. cited fact: 'according to sources' vs. 'in my view'\n\n"
+        "STYLE RULES — human writing only:\n"
+        "- Never use em-dashes (the — character) or en-dashes (the – character). Use a comma, period, or plain hyphen instead\n"
+        "- Never use double hyphens (--)\n"
+        "- Use contractions naturally: don't, it's, we're, they've\n"
+        "- Vary sentence length. Short punchy lines. Followed by a longer explanatory one when needed\n"
+        "- Plain text only. No markdown bold (**text**) or italic (*text*)\n"
+        "- Never open with 'I', 'In today's', 'It's important to note', or 'As a [role]'"
     )
 
 
@@ -80,7 +101,7 @@ async def generate_post_ideas(
     system = _build_system_prompt(platform, persona_context)
     user_msg = (
         f"Topic: {topic}\n\n"
-        f"Current sentiment & trends:\n{sentiment_context or 'No recent data — use your knowledge.'}\n\n"
+        f"SOURCE MATERIAL (only use facts and figures from here):\n{sentiment_context or _NO_SOURCE_FALLBACK}\n\n"
         f"Task: {CONTENT_TYPE_INSTRUCTIONS['idea'].format(count=count)}\n\n"
         f"Return JSON:\n"
         f'{{"ideas": [{{'
@@ -141,7 +162,7 @@ async def generate_long_form(
 
     user_msg = (
         f"Topic: {topic}\n\n"
-        f"Current sentiment & trends:\n{sentiment_context or 'No recent data — use your knowledge.'}\n\n"
+        f"SOURCE MATERIAL (only use facts and figures from here):\n{sentiment_context or _NO_SOURCE_FALLBACK}\n\n"
         f"Task: {instruction}\n\n"
         f"Return JSON:\n{json_format}"
     )
@@ -193,7 +214,7 @@ async def generate_for_all_platforms(
     )
     user_msg = (
         f"Topic: {topic}\n\n"
-        f"Sentiment/trends:\n{sentiment_context or 'Use your knowledge.'}\n\n"
+        f"SOURCE MATERIAL (only use facts and figures from here):\n{sentiment_context or _NO_SOURCE_FALLBACK}\n\n"
         f"Content type: {content_type}\n\n"
         "Return JSON with a key for each platform:\n"
         '{"twitter": {"body": "...", "score": 8}, '
@@ -237,18 +258,28 @@ async def generate_reusable_ideas(
         "You are an expert content strategist. "
         "Write platform-agnostic content that captures the core message powerfully. "
         "Content must be reusable — adaptable to Twitter, Instagram, Facebook, or Telegram later. "
-        "Focus on substance: compelling narrative, key insights, concrete data. "
-        "Avoid platform-specific formatting or hashtags."
+        "Focus on substance: compelling narrative, key insights, and facts grounded in the source material."
         f"{persona_block}\n\n"
         "Rules:\n"
         "- No filler phrases like 'In today's world' or 'It's important to note'\n"
-        "- Be specific — use numbers, examples, concrete details\n"
+        "- Only cite specific numbers, statistics, or dates that appear in the SOURCE MATERIAL\n"
+        "- If no figures are in the source material, describe patterns and insights without inventing data\n"
         "- Write like a knowledgeable human, not a marketing bot\n"
-        "- Always return valid JSON as instructed"
+        "- Always return valid JSON as instructed\n\n"
+        "ACCURACY RULES:\n"
+        "- Never invent statistics, percentages, revenue figures, or dates\n"
+        "- Never state a specific figure as fact unless it is in the source material\n"
+        "- Use hedging language when source data is absent: 'analysts note', 'commonly observed', 'broadly cited'\n\n"
+        "STYLE RULES:\n"
+        "- Never use em-dashes (—) or en-dashes (–). Comma, period, or plain hyphen only\n"
+        "- No double hyphens (--)\n"
+        "- Use contractions: don't, it's, we're, they've\n"
+        "- Vary sentence length deliberately\n"
+        "- Plain text. No markdown bold (**) or italic (*)"
     )
     user_msg = (
         f"Topic: {topic}\n\n"
-        f"Current sentiment & trends:\n{sentiment_context or 'No recent data — use your knowledge.'}\n\n"
+        f"SOURCE MATERIAL (only use facts and figures from here):\n{sentiment_context or _NO_SOURCE_FALLBACK}\n\n"
         f"Task: Generate {count} distinct reusable short post ideas. Each must have a different angle, tone, or hook. "
         "Vary approaches: data, story, question, contrarian take, list, or analogy. "
         "Each should be 150-300 words — substantive enough to stand alone, concise enough to adapt.\n\n"
@@ -267,7 +298,7 @@ async def generate_reusable_ideas(
         model=settings.OPENAI_GENERATION_MODEL,
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
         response_format={"type": "json_object"},
-        temperature=0.85,
+        temperature=0.7,
         max_tokens=2048,
     )
 
@@ -277,7 +308,7 @@ async def generate_reusable_ideas(
         results.append(FormattedContent(
             platform="general",
             content_type="idea",
-            body=idea.get("body", ""),
+            body=sanitize_body(idea.get("body", "")),
             meta={
                 "title": idea.get("title", ""),
                 "hook": idea.get("hook", ""),
@@ -303,15 +334,26 @@ async def generate_reusable_longform(
         f"{persona_block}\n\n"
         "Rules:\n"
         "- Strong opening hook\n"
-        "- 3-5 substantive points with detail and real examples\n"
+        "- 3-5 substantive points grounded in the source material provided\n"
         "- Memorable closing line\n"
         "- No filler phrases, no corporate speak\n"
         "- Write like a knowledgeable human\n"
-        "- Always return valid JSON as instructed"
+        "- Always return valid JSON as instructed\n\n"
+        "ACCURACY RULES:\n"
+        "- Every specific statistic, percentage, date, or figure must come from the SOURCE MATERIAL\n"
+        "- If source material has no specific data, use hedging language — never state a bare figure\n"
+        "- Do not invent timelines, projections, or outcomes\n"
+        "- Temporal claims must reference a date from the source material, not from general knowledge\n\n"
+        "STYLE RULES:\n"
+        "- Never use em-dashes (—) or en-dashes (–). Comma, period, or plain hyphen only\n"
+        "- No double hyphens (--)\n"
+        "- Use contractions: don't, it's, we're, they've\n"
+        "- Vary sentence length deliberately\n"
+        "- Plain text. No markdown bold (**) or italic (*)"
     )
     user_msg = (
         f"Topic: {topic}\n\n"
-        f"Current sentiment & trends:\n{sentiment_context or 'No recent data — use your knowledge.'}\n\n"
+        f"SOURCE MATERIAL (only use facts and figures from here):\n{sentiment_context or _NO_SOURCE_FALLBACK}\n\n"
         "Task: Write one complete, platform-agnostic long-form post (500-800 words). "
         "Structure: strong hook → 3-5 substantive points → memorable close.\n\n"
         'Return JSON: {"title": "...", "body": "...", "score": 8, "score_reason": "..."}'
@@ -321,7 +363,7 @@ async def generate_reusable_longform(
         model=settings.OPENAI_GENERATION_MODEL,
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
         response_format={"type": "json_object"},
-        temperature=0.75,
+        temperature=0.65,
         max_tokens=4096,
     )
 
@@ -329,7 +371,7 @@ async def generate_reusable_longform(
     return FormattedContent(
         platform="general",
         content_type="long_form",
-        body=data.get("body", ""),
+        body=sanitize_body(data.get("body", "")),
         meta={
             "title": data.get("title", ""),
             "score": data.get("score", 0),
@@ -403,4 +445,4 @@ async def re_edit_content(original: str, platform: str, instruction: str, person
     )
 
     data = json.loads(response.choices[0].message.content)
-    return data.get("body", original)
+    return sanitize_body(data.get("body", original))

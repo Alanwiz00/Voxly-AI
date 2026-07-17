@@ -77,9 +77,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    command: celery -A workers.crawl_worker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    command: celery -A workers.crawl_worker.celery_app beat --loglevel=info --schedule=/var/lib/celery/celerybeat-schedule
     volumes:
       - ./backend:/app
+      - celery-beat-data:/var/lib/celery
 
   flower:
     build: ./backend
@@ -153,3 +154,6 @@ services:
       - /app/node_modules
       - /app/.next
 
+
+volumes:
+  celery-beat-data:

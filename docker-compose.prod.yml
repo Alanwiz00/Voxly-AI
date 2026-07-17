@@ -79,7 +79,9 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    command: celery -A workers.crawl_worker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    command: celery -A workers.crawl_worker.celery_app beat --loglevel=info --schedule=/var/lib/celery/celerybeat-schedule
+    volumes:
+      - celery-beat-data:/var/lib/celery
 
   fetch-agent:
     build: ./fetch-agent
@@ -153,3 +155,5 @@ networks:
   dokploy-network:
     external: true
 
+volumes:
+  celery-beat-data:
