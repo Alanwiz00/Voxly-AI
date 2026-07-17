@@ -124,6 +124,7 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY}
     restart: always
     networks:
       - internal
@@ -132,7 +133,9 @@ services:
       - "3000"
     environment:
       - NODE_ENV=production
+      - AUTH_URL=${NEXTAUTH_URL}
       - NEXTAUTH_URL=${NEXTAUTH_URL}
+      - AUTH_SECRET=${NEXTAUTH_SECRET}
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
@@ -144,39 +147,9 @@ services:
       backend:
         condition: service_healthy
 
-  beteye-agent:
-    build: ./beteye-agent
-    restart: always
-    networks:
-      - internal
-    environment:
-      - VOXLY_API_URL=http://backend:8000
-      - VOXLY_API_KEY=${BETEYE_API_KEY}
-      - PERSONA_ID=${BETEYE_PERSONA_ID}
-      - COLLECT_INTERVAL_MINS=${BETEYE_COLLECT_INTERVAL_MINS:-30}
-      - POST_INTERVAL_HOURS=${BETEYE_POST_INTERVAL_HOURS:-4}
-      - POSTS_PER_RUN=${BETEYE_POSTS_PER_RUN:-2}
-      - DRY_RUN=false
-      - X_API_KEY=${X_API_KEY}
-      - X_API_SECRET=${X_API_SECRET}
-      - X_ACCESS_TOKEN=${X_ACCESS_TOKEN}
-      - X_ACCESS_TOKEN_SECRET=${X_ACCESS_TOKEN_SECRET}
-      - EXTRA_NEWS_FEEDS=${BETEYE_EXTRA_NEWS_FEEDS:-}
-      - EXTRA_X_ACCOUNTS=${BETEYE_EXTRA_X_ACCOUNTS:-}
-      - EXTRA_YOUTUBE_CHANNELS=${BETEYE_EXTRA_YOUTUBE_CHANNELS:-}
-      - MAX_CONTENT_AGE_HOURS=${BETEYE_MAX_CONTENT_AGE_HOURS:-2}
-      - TRANSCRIPT_MAX_CHARS=${BETEYE_TRANSCRIPT_MAX_CHARS:-2000}
-    volumes:
-      - beteye-data:/data
-    depends_on:
-      backend:
-        condition: service_healthy
-
 networks:
   internal:
     driver: bridge
   dokploy-network:
     external: true
 
-volumes:
-  beteye-data:

@@ -126,68 +126,20 @@ services:
       backend:
         condition: service_healthy
 
-  beteye-agent:
-    build: ./beteye-agent
-    restart: unless-stopped
-    environment:
-      # ── Core ──────────────────────────────────────────────────────────────
-      - VOXLY_API_URL=http://backend:8000
-      - VOXLY_API_KEY=${BETEYE_API_KEY}
-      - PERSONA_ID=${BETEYE_PERSONA_ID:-}
-      - DRY_RUN=${BETEYE_DRY_RUN:-false}
-
-      # ── Twitter / X credentials ───────────────────────────────────────────
-      # App must have Read+Write permissions; tokens must be regenerated after
-      # changing permissions in the Developer Portal.
-      - X_API_KEY=${X_API_KEY}
-      - X_API_SECRET=${X_API_SECRET}
-      - X_ACCESS_TOKEN=${X_ACCESS_TOKEN}
-      - X_ACCESS_TOKEN_SECRET=${X_ACCESS_TOKEN_SECRET}
-
-      # ── Schedule knobs ────────────────────────────────────────────────────
-      # DAILY_POST_MAX   — hard ceiling across all modes (default 15)
-      # BREAKING_SCORE   — score threshold that bypasses the schedule (default 6)
-      # STARTUP_GRACE    — minutes after start where collect_job is read-only (default 30)
-      - DAILY_POST_MAX=${BETEYE_DAILY_POST_MAX:-20}
-      - BREAKING_SCORE_THRESHOLD=${BETEYE_BREAKING_SCORE_THRESHOLD:-6}
-      - STARTUP_GRACE_MINS=${BETEYE_STARTUP_GRACE_MINS:-30}
-
-      # ── Collector ─────────────────────────────────────────────────────────
-      - COLLECT_INTERVAL_MINS=${BETEYE_COLLECT_INTERVAL_MINS:-30}
-      - MAX_CONTENT_AGE_HOURS=${BETEYE_MAX_CONTENT_AGE_HOURS:-2}
-      - QUEUE_MAX_AGE_HOURS=${BETEYE_QUEUE_MAX_AGE_HOURS:-4}
-      - TRANSCRIPT_MAX_CHARS=${BETEYE_TRANSCRIPT_MAX_CHARS:-2000}
-
-      # ── Sources ───────────────────────────────────────────────────────────
-      - EXTRA_NEWS_FEEDS=${BETEYE_EXTRA_NEWS_FEEDS:-}
-      - EXTRA_X_ACCOUNTS=${BETEYE_EXTRA_X_ACCOUNTS:-}
-      - EXTRA_YOUTUBE_CHANNELS=${BETEYE_EXTRA_YOUTUBE_CHANNELS:-}
-
-      # ── Fixtures API ──────────────────────────────────────────────────────
-      - APISPORTS_KEY=${APISPORTS_KEY:-}
-
-      # ── Breaking-news posting (bypasses schedule) ─────────────────────────
-      - POSTS_PER_RUN=${BETEYE_POSTS_PER_RUN:-1}
-      - POST_INTERVAL_SECS=${BETEYE_POST_INTERVAL_SECS:-180}
-      - ENABLE_REPLIES=${BETEYE_ENABLE_REPLIES:-false}
-    volumes:
-      - ./beteye-agent:/app
-      - beteye-data:/data
-    depends_on:
-      backend:
-        condition: service_healthy
-
   frontend:
     build:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-1x00000000000000000000AA}
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=development
+      - AUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
       - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      - AUTH_SECRET=${NEXTAUTH_SECRET}
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
@@ -201,5 +153,3 @@ services:
       - /app/node_modules
       - /app/.next
 
-volumes:
-  beteye-data:

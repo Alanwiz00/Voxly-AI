@@ -50,7 +50,7 @@ async def analyze_performance(body: PerformanceRequest, current_user: CurrentUse
     mode_avg = {m: round(sum(s) / len(s), 1) for m, s in mode_scores.items() if s}
 
     prompt = (
-        "You are analyzing tweet performance for @beteye — a World Cup 2026 football news account on X (Twitter).\n\n"
+        "You are analyzing social media post performance for an AI content agent on X (Twitter).\n\n"
         f"TOP PERFORMERS (highest engagement):\n{json.dumps(top, indent=2)}\n\n"
         f"LOWEST PERFORMERS:\n{json.dumps(bottom, indent=2)}\n\n"
         "Analyze what separates the winners from the losers. Look for:\n"
