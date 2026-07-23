@@ -121,6 +121,17 @@ services:
       backend:
         condition: service_healthy
 
+  a2a-daemon:
+    build: ./a2a-daemon
+    restart: always
+    networks:
+      - internal
+    volumes:
+      - a2a-onchainos:/root/.onchainos
+    depends_on:
+      backend:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./frontend
@@ -157,3 +168,4 @@ networks:
 
 volumes:
   celery-beat-data:
+  a2a-onchainos:
