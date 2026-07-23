@@ -1,26 +1,63 @@
-# Environment — never commit real secrets
+# ── Secrets & environment ────────────────────────────────────────────────────
 .env
 .env.local
+.env.*.local
 backend/.env
 frontend/.env
+mcp-server/.env
+fetch-agent/.env
 
-# Python
+# ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+venv/
 dist/
+build/
 *.egg
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
 
-# Node
+# ── Celery ───────────────────────────────────────────────────────────────────
+celerybeat-schedule
+celerybeat.pid
+*.pid
+
+# ── Node / Next.js ───────────────────────────────────────────────────────────
 node_modules/
-frontend/node_modules/
-frontend/.next/
-frontend/out/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+.vercel/
 
-# Docker
+# ── Logs & databases ─────────────────────────────────────────────────────────
 *.log
+*.sqlite
+*.sqlite3
+*.db
 
-# OS
+# ── Security — never commit keys or certs ────────────────────────────────────
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+
+# ── OS ───────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# ── IDE ──────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
