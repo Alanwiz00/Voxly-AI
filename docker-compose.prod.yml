@@ -132,6 +132,15 @@ services:
       backend:
         condition: service_healthy
 
+  landing:
+    build: ./landing
+    restart: always
+    networks:
+      - internal
+      - dokploy-network
+    expose:
+      - "80"
+
   frontend:
     build:
       context: ./frontend

@@ -210,9 +210,14 @@ async def generate_for_all_platforms(
         f"You are an expert social media strategist. "
         f"Given a topic, write platform-native content for all four major platforms in one response.\n\n"
         f"User persona:\n{persona_context or 'Not specified.'}\n\n"
-        "Rules: each platform version must feel native — not copy-pasted. "
+        "Rules: each platform version must feel native, not copy-pasted. "
         "Match each platform's tone, format, and length expectations exactly. "
-        "No emojis on Twitter/X. Other platforms: at most 1-2 emojis, only when they add meaning."
+        "No emojis on Twitter/X. Other platforms: at most 1-2 emojis, only when they add meaning.\n\n"
+        "STYLE RULES:\n"
+        "- Never use em-dashes (—) or en-dashes (–). Use a comma, period, or plain hyphen instead\n"
+        "- Never use double hyphens (--)\n"
+        "- Use contractions naturally: don't, it's, we're, they've\n"
+        "- Plain text only. No markdown bold (**text**) or italic (*text*)"
     )
     user_msg = (
         f"Topic: {topic}\n\n"
@@ -401,6 +406,7 @@ async def adapt_to_platform(
         "- Never use filler phrases\n"
         "- Write like a human, not a marketing bot\n"
         "- No emojis on Twitter/X. Other platforms: at most 1-2, only when they add real meaning\n"
+        "- Never use em-dashes (—) or en-dashes (–). Use a comma, period, or plain hyphen instead\n"
         "- Always return valid JSON as instructed"
     )
     user_msg = (
