@@ -11,7 +11,7 @@ VOXLY_API_KEY = os.environ["VOXLY_API_KEY"]
 MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
 MCP_PORT = int(os.environ.get("MCP_PORT", "8001"))
 
-mcp = FastMCP("VoxlyAI", host=MCP_HOST, port=MCP_PORT)
+mcp = FastMCP("VoxlyAI")
 
 # Lazy-initialised shared client — one connection pool for the process lifetime
 _http: httpx.AsyncClient | None = None
@@ -164,4 +164,7 @@ async def get_recent_content(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    # OKX A2MCP requires streamable-http transport (modern MCP standard).
+    # SSE is kept as a fallback for legacy clients.
+    transport = os.environ.get("MCP_TRANSPORT", "streamable-http")
+    mcp.run(transport=transport, host=MCP_HOST, port=MCP_PORT)

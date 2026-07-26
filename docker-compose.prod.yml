@@ -117,17 +117,7 @@ services:
       - VOXLY_API_KEY=${VOXLY_MCP_API_KEY}
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8001
-    depends_on:
-      backend:
-        condition: service_healthy
-
-  a2a-daemon:
-    build: ./a2a-daemon
-    restart: always
-    networks:
-      - internal
-    volumes:
-      - a2a-onchainos:/root/.onchainos
+      - MCP_TRANSPORT=streamable-http
     depends_on:
       backend:
         condition: service_healthy
