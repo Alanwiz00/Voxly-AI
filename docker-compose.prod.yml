@@ -117,7 +117,6 @@ services:
       - VOXLY_API_KEY=${VOXLY_MCP_API_KEY}
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8001
-      - MCP_TRANSPORT=streamable-http
     depends_on:
       backend:
         condition: service_healthy
