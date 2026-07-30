@@ -5,11 +5,13 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from db.postgres import get_db
 from db.models.user import User
 from db.models.api_key import ApiKey
+from db.models.token_usage import UserTokenUsage
 
 bearer = HTTPBearer()
 ALGORITHM = "HS256"
@@ -93,3 +95,47 @@ async def require_admin(current_user: Annotated[User, Depends(get_current_user)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
 AdminUser = Annotated[User, Depends(require_admin)]
 DB = Annotated[AsyncSession, Depends(get_db)]
+
+
+# ---------------------------------------------------------------------------
+# Token budget helpers
+# ---------------------------------------------------------------------------
+
+def _current_year_month() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m")
+
+
+async def check_token_budget(user: User, db: AsyncSession) -> None:
+    """Raise 429 if the user has exhausted their monthly token budget."""
+    limit = user.monthly_token_limit if user.monthly_token_limit is not None else settings.DEFAULT_MONTHLY_TOKEN_LIMIT
+    if limit == 0:
+        return  # unlimited
+
+    result = await db.execute(
+        select(UserTokenUsage).where(
+            UserTokenUsage.user_id == user.id,
+            UserTokenUsage.year_month == _current_year_month(),
+        )
+    )
+    usage = result.scalar_one_or_none()
+    used = usage.tokens_used if usage else 0
+    if used >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Monthly token limit of {limit:,} reached. Resets on the 1st of next month.",
+        )
+
+
+async def record_token_usage(user_id: int, tokens: int, db: AsyncSession) -> None:
+    """Upsert the monthly token counter for a user."""
+    year_month = _current_year_month()
+    stmt = (
+        pg_insert(UserTokenUsage)
+        .values(user_id=user_id, year_month=year_month, tokens_used=tokens)
+        .on_conflict_do_update(
+            constraint="uq_user_token_month",
+            set_={"tokens_used": UserTokenUsage.tokens_used + tokens},
+        )
+    )
+    await db.execute(stmt)
+    await db.commit()

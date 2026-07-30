@@ -140,7 +140,7 @@ async def generate_post_ideas(
             "hashtags": hashtags,
         })
         results.append(formatted)
-    return results
+    return results, response.usage.total_tokens
 
 
 async def generate_long_form(
@@ -195,7 +195,7 @@ async def generate_long_form(
         "score_reason": data.get("score_reason", ""),
         "hashtags": hashtags,
     })
-    return formatted
+    return formatted, response.usage.total_tokens
 
 
 async def generate_for_all_platforms(

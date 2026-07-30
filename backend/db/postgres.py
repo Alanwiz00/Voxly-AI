@@ -17,6 +17,7 @@ import db.models.persona  # noqa: E402, F401
 import db.models.topic  # noqa: E402, F401  (also registers TopicSentimentCache)
 import db.models.content  # noqa: E402, F401
 import db.models.api_key  # noqa: E402, F401
+import db.models.token_usage  # noqa: E402, F401
 
 
 async def get_db() -> AsyncSession:

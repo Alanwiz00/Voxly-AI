@@ -4,14 +4,14 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from sqlalchemy import select
 from qdrant_client.models import Filter, FieldCondition, MatchValue
-from api.deps import CurrentUser, DB
+from api.deps import CurrentUser, DB, check_token_budget, record_token_usage
 from db.models.topic import Topic, TopicSentimentCache
 from db.models.persona import PersonaProfile
 from db.models.content import GeneratedContent
 from db.qdrant import search_points
 from services.sentiment import get_embeddings
 from services.persona import get_best_persona_context, get_persona_context_by_id
-from services.generator import generate_post_ideas, generate_long_form, generate_for_all_platforms
+from services.generator import generate_post_ideas, generate_long_form
 from services.ingest import ingest, IMAGE_EXTENSIONS, IMAGE_MIME_TYPES
 from core.config import settings
 
@@ -75,6 +75,8 @@ async def generate(body: GenerateRequest, current_user: CurrentUser, db: DB):
     if body.content_type not in VALID_CONTENT_TYPES:
         raise HTTPException(status_code=400, detail=f"Invalid content_type. Choose from: {VALID_CONTENT_TYPES}")
 
+    await check_token_budget(current_user, db)
+
     topic_name = body.topic_name or ""
     topic_id = body.topic_id
 
@@ -92,7 +94,7 @@ async def generate(body: GenerateRequest, current_user: CurrentUser, db: DB):
     sentiment_context = await _get_sentiment_context(topic_id, topic_name, current_user.id, db)
 
     if body.content_type == "idea":
-        formatted_list = await generate_post_ideas(
+        formatted_list, tokens = await generate_post_ideas(
             topic=topic_name,
             platform=body.platform,
             persona_context=persona_context,
@@ -116,10 +118,11 @@ async def generate(body: GenerateRequest, current_user: CurrentUser, db: DB):
         await db.commit()
         for r in records:
             await db.refresh(r)
+        await record_token_usage(current_user.id, tokens, db)
         return {"content_type": "idea", "results": [_serialize(r) for r in records]}
 
     else:
-        formatted = await generate_long_form(
+        formatted, tokens = await generate_long_form(
             topic=topic_name,
             platform=body.platform,
             content_type=body.content_type,
@@ -139,6 +142,7 @@ async def generate(body: GenerateRequest, current_user: CurrentUser, db: DB):
         db.add(record)
         await db.commit()
         await db.refresh(record)
+        await record_token_usage(current_user.id, tokens, db)
         return {"content_type": body.content_type, "results": [_serialize(record)]}
 
 
@@ -167,6 +171,8 @@ async def generate_from_source(
             file_type = "image"
             mime_type = IMAGE_MIME_TYPES.get(ext, "image/jpeg")
 
+    await check_token_budget(current_user, db)
+
     source_text = await ingest(text=text, file_bytes=file_bytes, file_type=file_type, mime_type=mime_type, url=url)
     if not source_text:
         raise HTTPException(status_code=400, detail="Could not extract content from the provided source.")
@@ -178,7 +184,7 @@ async def generate_from_source(
         persona_context = await get_best_persona_context(current_user.id, topic_name)
 
     if content_type == "idea":
-        formatted_list = await generate_post_ideas(
+        formatted_list, tokens = await generate_post_ideas(
             topic=topic_name,
             platform=platform,
             persona_context=persona_context,
@@ -201,9 +207,10 @@ async def generate_from_source(
         await db.commit()
         for r in records:
             await db.refresh(r)
+        await record_token_usage(current_user.id, tokens, db)
         return {"content_type": "idea", "results": [_serialize(r) for r in records]}
     else:
-        formatted = await generate_long_form(
+        formatted, tokens = await generate_long_form(
             topic=topic_name,
             platform=platform,
             content_type=content_type,
@@ -222,20 +229,26 @@ async def generate_from_source(
         db.add(record)
         await db.commit()
         await db.refresh(record)
+        await record_token_usage(current_user.id, tokens, db)
         return {"content_type": content_type, "results": [_serialize(record)]}
 
 
 class BatchGenerateRequest(BaseModel):
     topic_id: int | None = None
     topic_name: str | None = None
+    platform: str
     content_type: str  # idea | long_form | thread | article
 
 
 @router.post("/batch")
 async def generate_batch(body: BatchGenerateRequest, current_user: CurrentUser, db: DB):
-    """Generate content for all four platforms in one request."""
+    """Generate content for the selected platform."""
+    if body.platform not in VALID_PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"Invalid platform. Choose from: {VALID_PLATFORMS}")
     if body.content_type not in VALID_CONTENT_TYPES:
         raise HTTPException(status_code=400, detail=f"Invalid content_type. Choose from: {VALID_CONTENT_TYPES}")
+
+    await check_token_budget(current_user, db)
 
     topic_name = body.topic_name or ""
     if body.topic_id:
@@ -246,21 +259,47 @@ async def generate_batch(body: BatchGenerateRequest, current_user: CurrentUser, 
         topic_name = topic.name
 
     persona_context = await get_best_persona_context(current_user.id, topic_name)
-    sentiment_context = await _get_sentiment_context(body.topic_id, topic_name, current_user.id)
+    sentiment_context = await _get_sentiment_context(body.topic_id, topic_name, current_user.id, db)
 
-    platform_results = await generate_for_all_platforms(
-        topic=topic_name,
-        content_type=body.content_type,
-        persona_context=persona_context,
-        sentiment_context=sentiment_context,
-    )
-
-    records = []
-    for platform, formatted in platform_results.items():
+    if body.content_type == "idea":
+        formatted_list, tokens = await generate_post_ideas(
+            topic=topic_name,
+            platform=body.platform,
+            persona_context=persona_context,
+            sentiment_context=sentiment_context,
+            count=3,
+        )
+        records = []
+        for f in formatted_list:
+            record = GeneratedContent(
+                user_id=current_user.id,
+                topic_id=body.topic_id,
+                platform=body.platform,
+                content_type="idea",
+                title=f.meta.get("title", topic_name),
+                content=f.body,
+                meta=f.meta,
+                version=1,
+            )
+            db.add(record)
+            records.append(record)
+        await db.commit()
+        for r in records:
+            await db.refresh(r)
+        await record_token_usage(current_user.id, tokens, db)
+        return {"content_type": "idea", "results": [_serialize(r) for r in records]}
+    else:
+        formatted, tokens = await generate_long_form(
+            topic=topic_name,
+            platform=body.platform,
+            content_type=body.content_type,
+            persona_context=persona_context,
+            sentiment_context=sentiment_context,
+        )
         record = GeneratedContent(
             user_id=current_user.id,
             topic_id=body.topic_id,
-            platform=platform,
+            platform=body.platform,
             content_type=body.content_type,
             title=formatted.meta.get("title", topic_name),
             content=formatted.body,
@@ -268,16 +307,10 @@ async def generate_batch(body: BatchGenerateRequest, current_user: CurrentUser, 
             version=1,
         )
         db.add(record)
-        records.append(record)
-
-    await db.commit()
-    for r in records:
-        await db.refresh(r)
-
-    return {
-        "content_type": body.content_type,
-        "results": {r.platform: _serialize(r) for r in records},
-    }
+        await db.commit()
+        await db.refresh(record)
+        await record_token_usage(current_user.id, tokens, db)
+        return {"content_type": body.content_type, "results": [_serialize(record)]}
 
 
 def _serialize(record: GeneratedContent) -> dict:

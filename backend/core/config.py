@@ -38,8 +38,12 @@ class Settings(BaseSettings):
     # OpenAI models
     OPENAI_GENERATION_MODEL: str = "gpt-4o"
     OPENAI_FAST_MODEL: str = "gpt-4o-mini"
+    OPENAI_SENTIMENT_MODEL: str = "gpt-4o-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_EMBEDDING_DIM: int = 1536
+
+    # Per-user token budget (0 = unlimited). Override per-user in the DB.
+    DEFAULT_MONTHLY_TOKEN_LIMIT: int = 100_000
 
 
 settings = Settings()
