@@ -78,21 +78,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
-        {/* Google Fonts — loaded by browser, not at build time */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap"
-          rel="stylesheet"
-        />
-        <style dangerouslySetInnerHTML={{ __html: `
-          :root {
-            --font-instrument-serif: 'Instrument Serif', Georgia, serif;
-            --font-inter: 'Inter', system-ui, -apple-system, sans-serif;
-          }
-          body { font-family: var(--font-inter); }
-        ` }} />
+        <link rel="preload" href="/fonts/instrument-serif-normal.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
+        <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
+        <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
       </head>
       <body>
         {children}
