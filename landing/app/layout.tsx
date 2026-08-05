@@ -35,23 +35,14 @@ export const metadata: Metadata = {
     follow:    true,
     googleBot: { index: true, follow: true },
   },
-  alternates: {
-    canonical: SITE_URL,
-  },
+  alternates: { canonical: SITE_URL },
   openGraph: {
     type:        'website',
     siteName:    'VoxlyAI',
     title:       'VoxlyAI | Your Voice, Amplified',
-    description: 'AI that learns your writing style and generates platform-native posts that sound like you wrote them. Twitter, Instagram, Facebook, Telegram.',
+    description: 'AI that learns your writing style and generates platform-native posts that sound like you wrote them.',
     url:         SITE_URL,
-    images: [
-      {
-        url:    OG_IMAGE,
-        width:  1200,
-        height: 630,
-        alt:    'VoxlyAI - Your Voice, Amplified',
-      },
-    ],
+    images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: 'VoxlyAI' }],
   },
   twitter: {
     card:        'summary_large_image',
@@ -80,16 +71,29 @@ const jsonLd = {
     priceCurrency: 'USD',
     description: 'Free to start. API keys generated instantly.',
   },
-  creator: {
-    '@type': 'Organization',
-    name: 'VoxlyAI',
-    url: SITE_URL,
-  },
+  creator: { '@type': 'Organization', name: 'VoxlyAI', url: SITE_URL },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        {/* Google Fonts — loaded by browser, not at build time */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        <link
+          href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap"
+          rel="stylesheet"
+        />
+        <style dangerouslySetInnerHTML={{ __html: `
+          :root {
+            --font-instrument-serif: 'Instrument Serif', Georgia, serif;
+            --font-inter: 'Inter', system-ui, -apple-system, sans-serif;
+          }
+          body { font-family: var(--font-inter); }
+        ` }} />
+      </head>
       <body>
         {children}
         <script
