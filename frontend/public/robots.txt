@@ -1,2 +1,9 @@
 User-agent: *
-Disallow: /
+Disallow: /api/
+Disallow: /dashboard/
+Disallow: /generate/
+Disallow: /content/
+Disallow: /settings/
+Allow: /
+
+Sitemap: https://voxlyai.online/sitemap.xml
