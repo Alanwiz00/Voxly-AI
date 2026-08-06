@@ -52,7 +52,7 @@ export default function Navbar() {
             <a href={`${APP}/login`} className="btn-secondary text-sm py-2 px-4">
               Sign in
             </a>
-            <a href={`${APP}/register`} className="btn-primary text-sm py-2 px-4">
+            <a href={`${APP}/login`} className="btn-primary text-sm py-2 px-4">
               Get started free
             </a>
           </div>
@@ -97,7 +97,7 @@ export default function Navbar() {
               <a href={`${APP}/login`} className="btn-secondary text-sm w-full justify-center">
                 Sign in
               </a>
-              <a href={`${APP}/register`} className="btn-primary text-sm w-full justify-center">
+              <a href={`${APP}/login`} className="btn-primary text-sm w-full justify-center">
                 Get started free
               </a>
             </div>

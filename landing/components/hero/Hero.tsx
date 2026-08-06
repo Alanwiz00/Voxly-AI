@@ -62,7 +62,7 @@ export default function Hero() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55, delay: 0.34, ease: [0.16, 1, 0.3, 1] }}
           >
-            <a href={`${APP}/register`} className="btn-primary text-base px-7 py-3.5">
+            <a href={`${APP}/login`} className="btn-primary text-base px-7 py-3.5">
               Start for free
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 8h10M9 4l4 4-4 4" />

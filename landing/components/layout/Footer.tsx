@@ -1,7 +1,5 @@
 import Image from 'next/image'
 
-const APP = 'https://app.voxlyai.online'
-
 export default function Footer() {
   return (
     <footer className="section-footer">
@@ -70,8 +68,8 @@ export default function Footer() {
             © {new Date().getFullYear()} VoxlyAI. All rights reserved.
           </p>
           <div className="flex gap-6">
-            <a href="/privacy" className="text-xs hover:text-white transition-colors" style={{ color: '#555' }}>Privacy</a>
-            <a href="/terms" className="text-xs hover:text-white transition-colors" style={{ color: '#555' }}>Terms</a>
+            <a href="https://app.voxlyai.online/privacy" className="text-xs hover:text-white transition-colors" style={{ color: '#555' }}>Privacy</a>
+            <a href="https://app.voxlyai.online/terms" className="text-xs hover:text-white transition-colors" style={{ color: '#555' }}>Terms</a>
           </div>
         </div>
       </div>
@@ -82,12 +80,10 @@ export default function Footer() {
 const FOOTER_PRODUCT = [
   { label: 'Dashboard',    href: `https://app.voxlyai.online` },
   { label: 'API Docs',     href: '/api-docs' },
-  { label: 'OKX.AI Agent', href: 'https://okx.ai' },
-  { label: 'Changelog',    href: '#' },
+  { label: 'OKX.AI Agent', href: 'https://www.okx.ai/agents/10008' },
 ]
 const FOOTER_COMPANY = [
-  { label: 'About',   href: '#' },
-  { label: 'Privacy', href: '/privacy' },
-  { label: 'Terms',   href: '/terms' },
+  { label: 'Privacy', href: `https://app.voxlyai.online/privacy` },
+  { label: 'Terms',   href: `https://app.voxlyai.online/terms` },
   { label: 'Contact', href: 'mailto:hello@voxlyai.online' },
 ]

@@ -20,7 +20,7 @@ export default function CTA() {
             Start free. No credit card. Get your API key in 60 seconds and generate your first post in under five.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <a href={`${APP}/register`} className="btn-primary text-base px-8 py-3.5">
+            <a href={`${APP}/login`} className="btn-primary text-base px-8 py-3.5">
               Create free account
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 8h10M9 4l4 4-4 4" />
