@@ -84,4 +84,8 @@ async def llm_complete(
             errors.append(f"Gemini: {exc}")
             logger.error("Gemini generation failed: %s", exc)
 
+    if not errors:
+        raise RuntimeError(
+            "No LLM providers configured. Set GROQ_API_KEY and/or GEMINI_API_KEY in .env"
+        )
     raise RuntimeError(f"All LLM providers failed: {'; '.join(errors)}")
