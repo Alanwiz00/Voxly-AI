@@ -1,8 +1,7 @@
 import json
 from datetime import datetime, timezone
-from openai import AsyncOpenAI
 from core.config import settings
-from services.sentiment import get_openai
+from services.llm import llm_complete
 
 MIN_RATINGS_REQUIRED = 3
 MAX_LIKED_SAMPLED = 20
@@ -52,8 +51,7 @@ async def synthesize_user_style(user_id: int) -> str | None:
         else "None provided yet."
     )
 
-    response = await get_openai().chat.completions.create(
-        model=settings.OPENAI_SENTIMENT_MODEL,
+    text, _tokens = await llm_complete(
         messages=[
             {
                 "role": "system",
@@ -78,12 +76,11 @@ async def synthesize_user_style(user_id: int) -> str | None:
                 ),
             },
         ],
-        response_format={"type": "json_object"},
         temperature=0.3,
         max_tokens=512,
     )
 
-    data = json.loads(response.choices[0].message.content)
+    data = json.loads(text)
     return data.get("style_summary") or None
 
 

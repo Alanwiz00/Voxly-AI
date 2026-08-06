@@ -1,7 +1,6 @@
 import json
-from openai import AsyncOpenAI
 from core.config import settings
-from services.sentiment import get_openai
+from services.llm import llm_complete
 from services.formatter import format_content, sanitize_body, FormattedContent
 
 PLATFORM_INSTRUCTIONS = {
@@ -117,15 +116,13 @@ async def generate_post_ideas(
         f"}}]}}"
     )
 
-    response = await get_openai().chat.completions.create(
-        model=settings.OPENAI_GENERATION_MODEL,
+    text, tokens = await llm_complete(
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
-        response_format={"type": "json_object"},
         temperature=0.85,
         max_tokens=2048,
     )
 
-    data = json.loads(response.choices[0].message.content)
+    data = json.loads(text)
     results = []
     for idea in data.get("ideas", []):
         body = idea.get("body", "")
@@ -140,7 +137,7 @@ async def generate_post_ideas(
             "hashtags": hashtags,
         })
         results.append(formatted)
-    return results, response.usage.total_tokens
+    return results, tokens
 
 
 async def generate_long_form(
@@ -169,15 +166,13 @@ async def generate_long_form(
         f"Return JSON:\n{json_format}"
     )
 
-    response = await get_openai().chat.completions.create(
-        model=settings.OPENAI_GENERATION_MODEL,
+    text, tokens = await llm_complete(
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
-        response_format={"type": "json_object"},
         temperature=0.75,
         max_tokens=4096,
     )
 
-    data = json.loads(response.choices[0].message.content)
+    data = json.loads(text)
 
     if content_type == "thread" and "tweets" in data:
         tweets = data["tweets"]
@@ -195,7 +190,7 @@ async def generate_long_form(
         "score_reason": data.get("score_reason", ""),
         "hashtags": hashtags,
     })
-    return formatted, response.usage.total_tokens
+    return formatted, tokens
 
 
 async def generate_for_all_platforms(
@@ -230,15 +225,13 @@ async def generate_for_all_platforms(
         '"telegram": {"body": "...", "score": 8}}'
     )
 
-    response = await get_openai().chat.completions.create(
-        model=settings.OPENAI_GENERATION_MODEL,
+    text, _tokens = await llm_complete(
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
-        response_format={"type": "json_object"},
         temperature=0.8,
         max_tokens=4096,
     )
 
-    data = json.loads(response.choices[0].message.content)
+    data = json.loads(text)
     results = {}
     for platform in platforms:
         p_data = data.get(platform, {})
@@ -301,15 +294,13 @@ async def generate_reusable_ideas(
         f"}}]}}"
     )
 
-    response = await get_openai().chat.completions.create(
-        model=settings.OPENAI_GENERATION_MODEL,
+    text, _tokens = await llm_complete(
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
-        response_format={"type": "json_object"},
         temperature=0.7,
         max_tokens=2048,
     )
 
-    data = json.loads(response.choices[0].message.content)
+    data = json.loads(text)
     results = []
     for idea in data.get("ideas", []):
         results.append(FormattedContent(
@@ -366,15 +357,13 @@ async def generate_reusable_longform(
         'Return JSON: {"title": "...", "body": "...", "score": 8, "score_reason": "..."}'
     )
 
-    response = await get_openai().chat.completions.create(
-        model=settings.OPENAI_GENERATION_MODEL,
+    text, _tokens = await llm_complete(
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
-        response_format={"type": "json_object"},
         temperature=0.65,
         max_tokens=4096,
     )
 
-    data = json.loads(response.choices[0].message.content)
+    data = json.loads(text)
     return FormattedContent(
         platform="general",
         content_type="long_form",
@@ -419,15 +408,13 @@ async def adapt_to_platform(
         )
     )
 
-    response = await get_openai().chat.completions.create(
-        model=settings.OPENAI_GENERATION_MODEL,
+    text, _tokens = await llm_complete(
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
-        response_format={"type": "json_object"},
         temperature=0.7,
         max_tokens=2048,
     )
 
-    data = json.loads(response.choices[0].message.content)
+    data = json.loads(text)
     body = data.get("body", content)
     hashtags = data.get("hashtags", [])
     formatted = format_content(platform, body, "long_form", hashtags)
@@ -445,12 +432,10 @@ async def re_edit_content(original: str, platform: str, instruction: str, person
         'Return JSON: {"body": "..."}'
     )
 
-    response = await get_openai().chat.completions.create(
-        model=settings.OPENAI_GENERATION_MODEL,
+    text, _tokens = await llm_complete(
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
-        response_format={"type": "json_object"},
         temperature=0.6,
     )
 
-    data = json.loads(response.choices[0].message.content)
+    data = json.loads(text)
     return sanitize_body(data.get("body", original))

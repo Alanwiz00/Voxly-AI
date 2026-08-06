@@ -35,12 +35,20 @@ class Settings(BaseSettings):
     PERSONA_COLLECTION: str = "user_personas"
     SENTIMENT_COLLECTION: str = "topic_sentiment"
 
-    # OpenAI models
-    OPENAI_GENERATION_MODEL: str = "gpt-4o"
+    # OpenAI — kept only for vision (extract_from_image) and embeddings
+    OPENAI_GENERATION_MODEL: str = "gpt-4o"   # vision fallback only
     OPENAI_FAST_MODEL: str = "gpt-4o-mini"
     OPENAI_SENTIMENT_MODEL: str = "gpt-4o-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_EMBEDDING_DIM: int = 1536
+
+    # Groq — primary text generation
+    GROQ_API_KEY: str = ""
+    GROQ_GENERATION_MODEL: str = "llama-3.1-8b-instant"
+
+    # Gemini — fallback text generation
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.0-flash"
 
     # Per-user token budget (0 = unlimited). Override per-user in the DB.
     DEFAULT_MONTHLY_TOKEN_LIMIT: int = 100_000

@@ -1,6 +1,8 @@
+import json
 from openai import AsyncOpenAI
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from core.config import settings
+from services.llm import llm_complete
 
 _client: AsyncOpenAI | None = None
 _vader = SentimentIntensityAnalyzer()
@@ -27,39 +29,31 @@ def vader_score(text: str) -> tuple[float, str]:
 
 async def summarize_and_analyze(topic_name: str, content: str, source_date: str | None = None) -> dict:
     date_hint = f"\nSource publication date (if known): {source_date}" if source_date else ""
-    response = await get_openai().chat.completions.create(
-        model=settings.OPENAI_FAST_MODEL,
+    system = (
+        "You are a strict content analyst. Given raw web content about a topic, "
+        "return a JSON object with these exact keys:\n"
+        "  'summary': 2-3 sentence summary of the key points\n"
+        "  'key_themes': list of 3-5 theme strings\n"
+        "  'key_facts': list of up to 6 VERBATIM facts, statistics, or data points "
+        "extracted directly from the source — include the date/year if the source states it. "
+        "ONLY include facts that explicitly appear in the source text. "
+        "Leave this list EMPTY if no specific figures or verifiable facts are present.\n"
+        "  'article_date': the publication or event date from the content in ISO-8601 format "
+        "(YYYY-MM-DD or YYYY-MM), or null if not detectable\n"
+        "  'sentiment': one of: positive, negative, neutral\n"
+        "  'sentiment_reason': one sentence explaining the sentiment\n\n"
+        "CRITICAL: Never invent or infer facts not stated in the source."
+    )
+    text, _tokens = await llm_complete(
         messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a strict content analyst. Given raw web content about a topic, "
-                    "return a JSON object with these exact keys:\n"
-                    "  'summary': 2-3 sentence summary of the key points\n"
-                    "  'key_themes': list of 3-5 theme strings\n"
-                    "  'key_facts': list of up to 6 VERBATIM facts, statistics, or data points "
-                    "extracted directly from the source — include the date/year if the source states it. "
-                    "ONLY include facts that explicitly appear in the source text. "
-                    "Leave this list EMPTY if no specific figures or verifiable facts are present.\n"
-                    "  'article_date': the publication or event date from the content in ISO-8601 format "
-                    "(YYYY-MM-DD or YYYY-MM), or null if not detectable\n"
-                    "  'sentiment': one of: positive, negative, neutral\n"
-                    "  'sentiment_reason': one sentence explaining the sentiment\n\n"
-                    "CRITICAL: Never invent or infer facts not stated in the source."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"Topic: {topic_name}{date_hint}\n\nContent:\n{content[:5000]}",
-            },
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"Topic: {topic_name}{date_hint}\n\nContent:\n{content[:5000]}"},
         ],
-        response_format={"type": "json_object"},
         temperature=0.1,
     )
 
-    import json
     try:
-        data = json.loads(response.choices[0].message.content)
+        data = json.loads(text)
     except Exception:
         data = {
             "summary": content[:300],
