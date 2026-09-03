@@ -1,10 +1,14 @@
+import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from core.config import settings
 from db.postgres import init_db
 from db.qdrant import ensure_collections
 from api.routes import auth, users, topics, generate, content, persona, api_keys, analyze
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -105,6 +109,25 @@ app.include_router(content.router)
 app.include_router(persona.router)
 app.include_router(api_keys.router)
 app.include_router(analyze.router)
+
+
+# Without this, any unhandled exception (a missing LLM provider key, a
+# Qdrant/DB hiccup, a bad LLM response, whatever) falls through to
+# Starlette's default handler, which returns a bare "Internal Server Error"
+# with zero detail — undiagnosable from outside the container. This does
+# NOT touch FastAPI's own HTTPException/validation handling (those stay on
+# their normal, more specific handlers); it only catches what would
+# otherwise be silent. Full traceback goes to the server logs; the caller
+# gets the exception type + message, which every route here is already
+# built to call with an authenticated, semi-trusted client (dashboard or a
+# vlx- API key holder), not the open public.
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"error": type(exc).__name__, "detail": str(exc)},
+    )
 
 
 @app.get("/health")

@@ -35,10 +35,12 @@ class Settings(BaseSettings):
     PERSONA_COLLECTION: str = "user_personas"
     SENTIMENT_COLLECTION: str = "topic_sentiment"
 
-    # OpenAI — kept only for vision (extract_from_image) and embeddings
+    # OpenAI — vision (extract_from_image), embeddings, and last-resort
+    # text generation when both Groq and Gemini fail
     OPENAI_GENERATION_MODEL: str = "gpt-4o"   # vision fallback only
     OPENAI_FAST_MODEL: str = "gpt-4o-mini"
     OPENAI_SENTIMENT_MODEL: str = "gpt-4o-mini"
+    OPENAI_TEXT_MODEL: str = "gpt-4o-mini"   # text generation fallback (after Groq, Gemini)
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_EMBEDDING_DIM: int = 1536
 
