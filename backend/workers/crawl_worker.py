@@ -9,9 +9,11 @@ if "/app" not in sys.path:
 
 from celery import Celery
 from qdrant_client.models import PointStruct
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from core.config import settings
-from db.postgres import AsyncSessionLocal
+import db.postgres  # noqa: F401  — registers all ORM models on the shared mapper
 from db.models.topic import Topic, CrawlResult, TopicSentimentCache
 from db.qdrant import upsert_points, delete_by_payload
 from services.crawl import crawl_topic
@@ -42,6 +44,24 @@ celery_app.conf.update(
             "schedule": timedelta(hours=24),
         },
     },
+)
+
+
+# Celery prefork workers run every task in a brand-new event loop (asyncio.run
+# below). asyncpg binds each connection to the loop that opened it, so a pooled
+# connection from one task's loop blows up the next task with
+# "InterfaceError: cannot perform operation: another operation is in progress".
+# NullPool keeps nothing between sessions — each task opens a fresh connection on
+# its own loop and closes it. Crawl tasks run a handful of times a day, so the
+# per-session connect cost is irrelevant. The API keeps its own pooled engine in
+# db.postgres; this one is worker-only.
+worker_engine = create_async_engine(
+    settings.DATABASE_URL,
+    poolclass=NullPool,
+    echo=settings.APP_ENV == "development",
+)
+AsyncSessionLocal = async_sessionmaker(
+    worker_engine, class_=AsyncSession, expire_on_commit=False
 )
 
 
