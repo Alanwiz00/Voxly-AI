@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Auth.js v5 uses __Secure- prefix on HTTPS (production), plain name on HTTP (dev)
@@ -22,5 +22,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|logo.svg|icon.svg).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|logo.svg|logo.png|icon.svg|og-image.png|robots.txt).*)"],
 };

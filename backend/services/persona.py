@@ -1,3 +1,4 @@
+import logging
 import uuid
 from collections import defaultdict
 from pydantic import BaseModel
@@ -5,6 +6,8 @@ from qdrant_client.models import PointStruct, Filter, FieldCondition, MatchValue
 from db.qdrant import upsert_points, search_points, delete_by_payload
 from services.sentiment import get_embeddings
 from core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class PersonaData(BaseModel):
@@ -65,12 +68,8 @@ async def get_best_persona_context(user_id: int, query: str, top_k: int = 12) ->
     → pick the persona with the highest cumulative score → return its chunks.
     Falls back to the default persona, then to the first available one.
     """
-    query_embedding = (await get_embeddings([query]))[0]
-    results = await search_points(
-        settings.PERSONA_COLLECTION,
-        query_embedding,
-        limit=top_k,
-        filter_=Filter(must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))]),
+    results = await _search_persona_chunks(
+        query, top_k, [FieldCondition(key="user_id", match=MatchValue(value=user_id))]
     )
     if not results:
         return ""
@@ -91,13 +90,34 @@ async def get_best_persona_context(user_id: int, query: str, top_k: int = 12) ->
     return "\n".join(chunks_by_persona[best_persona_id])
 
 
-async def get_persona_context_by_id(persona_id: int, query: str, top_k: int = 5) -> str:
-    """Retrieve context chunks for a specific persona."""
-    query_embedding = (await get_embeddings([query]))[0]
-    results = await search_points(
-        settings.PERSONA_COLLECTION,
-        query_embedding,
-        limit=top_k,
-        filter_=Filter(must=[FieldCondition(key="persona_id", match=MatchValue(value=persona_id))]),
+async def get_persona_context_by_id(user_id: int, persona_id: int, query: str, top_k: int = 5) -> str:
+    """Retrieve context chunks for a specific persona owned by user_id."""
+    # Filter on user_id too: persona_id comes from the request body, so without it
+    # a caller could pull another user's persona samples into their output.
+    results = await _search_persona_chunks(
+        query,
+        top_k,
+        [
+            FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+            FieldCondition(key="persona_id", match=MatchValue(value=persona_id)),
+        ],
     )
     return "\n".join(r["payload"]["chunk"] for r in results)
+
+
+async def _search_persona_chunks(query: str, top_k: int, conditions: list[FieldCondition]) -> list[dict]:
+    """
+    Persona context is optional enrichment: if embeddings or Qdrant are unavailable,
+    log it and let generation continue without persona context instead of failing.
+    """
+    try:
+        query_embedding = (await get_embeddings([query]))[0]
+        return await search_points(
+            settings.PERSONA_COLLECTION,
+            query_embedding,
+            limit=top_k,
+            filter_=Filter(must=conditions),
+        )
+    except Exception as exc:
+        logger.warning("Persona context unavailable, generating without it: %r", exc)
+        return []

@@ -1,0 +1,12 @@
+# Keep secrets and host build state out of the image.
+.env
+.env.*
+!.env.example
+node_modules
+.next
+out
+*.tsbuildinfo
+*.log
+.git
+Dockerfile
+.dockerignore

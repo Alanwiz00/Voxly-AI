@@ -1,23 +1,10 @@
-import { createHmac } from "crypto";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
-import type { Session } from "next-auth";
 import { authConfig } from "./auth.config";
+import { readAgeGate } from "./age-gate";
 
 const IS_DEV = process.env.NODE_ENV !== "production";
-
-// Mint a backend-compatible HS256 JWT (matches what python-jose expects).
-function mintDevToken(email: string, name: string): string {
-  const secret = process.env.NEXTAUTH_SECRET ?? "";
-  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
-  const now = Math.floor(Date.now() / 1000);
-  const body = Buffer.from(
-    JSON.stringify({ email, name, iat: now, exp: now + 86400 })
-  ).toString("base64url");
-  const sig = createHmac("sha256", secret).update(`${header}.${body}`).digest("base64url");
-  return `${header}.${body}.${sig}`;
-}
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
@@ -43,28 +30,21 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ],
   callbacks: {
     async signIn({ user }) {
+      // Sign-in doubles as signup, so nobody gets an account without passing
+      // the age gate (/api/age-check), whichever provider they use.
+      if ((await readAgeGate()) !== "eligible") return false;
       return !!user.email;
     },
 
-    async jwt({ token, account, profile, user }) {
-      if (account?.id_token) {
-        token.idToken = account.id_token;
-      }
+    async jwt({ token, profile }) {
       if (profile) {
         token.picture = (profile as { picture?: string }).picture;
       }
-      // Dev credentials: mint a signed token the backend will accept
-      if (account?.provider === "dev-credentials" && user?.email) {
-        token.email = user.email;
-        token.name = user.name ?? user.email;
-        token.idToken = mintDevToken(user.email, user.name ?? user.email);
-      }
+      // Never keep provider tokens in the session: anything here is readable by
+      // client JS via /api/auth/session. Backend tokens come from /api/auth/backend-token.
+      // Also scrubs the field from sessions issued before this was removed.
+      delete token.idToken;
       return token;
-    },
-
-    async session({ session, token }) {
-      (session as Session & { apiToken?: string }).apiToken = token.idToken as string | undefined;
-      return session;
     },
   },
 });

@@ -3,6 +3,8 @@ import type { MetadataRoute } from 'next'
 // Emitted to out/sitemap.xml at build time (static, works with output: 'export').
 const SITE_URL = 'https://voxlyai.online'
 
+export const dynamic = 'force-static'
+
 export default function sitemap(): MetadataRoute.Sitemap {
   const lastModified = new Date()
   return [

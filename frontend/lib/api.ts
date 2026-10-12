@@ -4,16 +4,19 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export const api = axios.create({ baseURL: BASE_URL });
 
-// Cache the backend token for the session lifetime
+// Cache the short-lived backend token until shortly before it expires
 let _cachedToken: string | null = null;
+let _tokenExpiresAt = 0;
 
 async function getBackendToken(): Promise<string | null> {
-  if (_cachedToken) return _cachedToken;
+  if (_cachedToken && Date.now() < _tokenExpiresAt) return _cachedToken;
   try {
-    const res = await fetch("/api/auth/backend-token");
+    const res = await fetch("/api/auth/backend-token", { cache: "no-store" });
     if (!res.ok) return null;
     const data = await res.json();
     _cachedToken = data.token ?? null;
+    // Refresh a minute early; uses the local clock so client/server skew doesn't matter
+    _tokenExpiresAt = Date.now() + ((data.expires_in ?? 0) - 60) * 1000;
     return _cachedToken;
   } catch {
     return null;
@@ -22,6 +25,7 @@ async function getBackendToken(): Promise<string | null> {
 
 export function clearTokenCache() {
   _cachedToken = null;
+  _tokenExpiresAt = 0;
 }
 
 api.interceptors.request.use(async (config) => {

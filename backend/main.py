@@ -1,4 +1,5 @@
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -117,17 +118,26 @@ app.include_router(analyze.router)
 # with zero detail — undiagnosable from outside the container. This does
 # NOT touch FastAPI's own HTTPException/validation handling (those stay on
 # their normal, more specific handlers); it only catches what would
-# otherwise be silent. Full traceback goes to the server logs; the caller
-# gets the exception type + message, which every route here is already
-# built to call with an authenticated, semi-trusted client (dashboard or a
-# vlx- API key holder), not the open public.
+# otherwise be silent.
+#
+# The full traceback goes to the server logs tagged with an error_id, and the
+# caller gets that same id to report. Exception messages are only returned in
+# development: they can carry DB hosts, SQL and parameters, or upstream URLs,
+# and these errors can fire before auth completes (e.g. a DB error while
+# resolving the current user), so they'd reach unauthenticated callers too.
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse(
-        status_code=500,
-        content={"error": type(exc).__name__, "detail": str(exc)},
-    )
+    error_id = uuid.uuid4().hex[:12]
+    logger.exception("Unhandled error %s on %s %s", error_id, request.method, request.url.path)
+    if settings.APP_ENV == "development":
+        content = {"error": type(exc).__name__, "detail": str(exc), "error_id": error_id}
+    else:
+        content = {
+            "error": "InternalServerError",
+            "detail": f"Something went wrong on our side (ref {error_id}).",
+            "error_id": error_id,
+        }
+    return JSONResponse(status_code=500, content=content)
 
 
 @app.get("/health")

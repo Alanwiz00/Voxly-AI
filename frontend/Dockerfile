@@ -1,8 +1,9 @@
-FROM node:22-alpine
+FROM node:24-alpine
 WORKDIR /app
-COPY package*.json ./
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm install
+    npm ci
 COPY . .
 
 # NEXT_PUBLIC_* vars must be available at build time so Next.js can bake

@@ -1,9 +1,9 @@
 import hashlib
 from datetime import datetime, timezone
 from typing import Annotated
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,8 +19,10 @@ ALGORITHM = "HS256"
 
 def decode_token(token: str) -> dict:
     try:
-        return jwt.decode(token, settings.NEXTAUTH_SECRET, algorithms=[ALGORITHM])
-    except JWTError:
+        # Small leeway: tokens are minted by the Next.js server, whose clock may be
+        # slightly ahead of ours (PyJWT rejects an `iat` in the future).
+        return jwt.decode(token, settings.NEXTAUTH_SECRET, algorithms=[ALGORITHM], leeway=30)
+    except jwt.PyJWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
 

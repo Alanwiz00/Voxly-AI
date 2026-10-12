@@ -4,7 +4,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    APP_ENV: str = "development"
+    # Defaults to production so a deploy that forgets to set it doesn't echo SQL
+    # or return exception details; dev compose and .env.example set "development".
+    APP_ENV: str = "production"
     SECRET_KEY: str
     DATABASE_URL: str
     QDRANT_URL: str

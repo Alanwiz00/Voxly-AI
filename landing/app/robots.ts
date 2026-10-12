@@ -3,6 +3,8 @@ import type { MetadataRoute } from 'next'
 // Emitted to out/robots.txt at build time (static, works with output: 'export').
 const SITE_URL = 'https://voxlyai.online'
 
+export const dynamic = 'force-static'
+
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: { userAgent: '*', allow: '/' },

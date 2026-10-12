@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
@@ -14,6 +15,8 @@ from services.persona import get_best_persona_context, get_persona_context_by_id
 from services.generator import generate_post_ideas, generate_long_form
 from services.ingest import ingest, IMAGE_EXTENSIONS, IMAGE_MIME_TYPES
 from core.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/generate", tags=["generate"])
 
@@ -48,14 +51,19 @@ async def _get_sentiment_context(topic_id: int | None, topic_name: str, user_id:
     if cached:
         return cached.sentiment_context
 
-    # Fallback: Qdrant (minimal, for topics not yet crawled under the new system)
-    query_emb = (await get_embeddings([topic_name]))[0]
-    results = await search_points(
-        settings.SENTIMENT_COLLECTION,
-        query_emb,
-        limit=6,
-        filter_=Filter(must=[FieldCondition(key="topic_id", match=MatchValue(value=topic_id))]),
-    )
+    # Fallback: Qdrant (minimal, for topics not yet crawled under the new system).
+    # Optional enrichment, so an embeddings/Qdrant outage shouldn't fail generation.
+    try:
+        query_emb = (await get_embeddings([topic_name]))[0]
+        results = await search_points(
+            settings.SENTIMENT_COLLECTION,
+            query_emb,
+            limit=6,
+            filter_=Filter(must=[FieldCondition(key="topic_id", match=MatchValue(value=topic_id))]),
+        )
+    except Exception as exc:
+        logger.warning("Sentiment context unavailable, generating without it: %r", exc)
+        return ""
     if not results:
         return ""
     lines = []
@@ -88,7 +96,7 @@ async def generate(body: GenerateRequest, current_user: CurrentUser, db: DB):
         topic_name = topic.name
 
     if body.persona_id:
-        persona_context = await get_persona_context_by_id(body.persona_id, topic_name)
+        persona_context = await get_persona_context_by_id(current_user.id, body.persona_id, topic_name)
     else:
         persona_context = await get_best_persona_context(current_user.id, topic_name)
     sentiment_context = await _get_sentiment_context(topic_id, topic_name, current_user.id, db)
@@ -179,7 +187,7 @@ async def generate_from_source(
 
     topic_name = f"Custom source ({(url or file.filename if file else 'text')[:60]})"
     if persona_id:
-        persona_context = await get_persona_context_by_id(persona_id, topic_name)
+        persona_context = await get_persona_context_by_id(current_user.id, persona_id, topic_name)
     else:
         persona_context = await get_best_persona_context(current_user.id, topic_name)
 

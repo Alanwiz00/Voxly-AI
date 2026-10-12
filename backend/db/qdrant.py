@@ -57,14 +57,14 @@ async def search_points(
     limit: int = 5,
     filter_: Filter | None = None,
 ) -> list[dict]:
-    results = await get_qdrant().search(
+    response = await get_qdrant().query_points(
         collection_name=collection,
-        query_vector=vector,
+        query=vector,
         limit=limit,
         query_filter=filter_,
         with_payload=True,
     )
-    return [{"id": r.id, "score": r.score, "payload": r.payload} for r in results]
+    return [{"id": r.id, "score": r.score, "payload": r.payload} for r in response.points]
 
 
 async def delete_by_payload(collection: str, field: str, value: str | int) -> None:
