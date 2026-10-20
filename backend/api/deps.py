@@ -109,6 +109,10 @@ def _current_year_month() -> str:
 
 async def check_token_budget(user: User, db: AsyncSession) -> None:
     """Raise 429 if the user has exhausted their monthly token budget."""
+    # Admins are unlimited, and so are the agents (MCP server, Fetch.ai agent, BetEye)
+    # running on API keys an admin created: a key acts as its owner. Usage is still recorded.
+    if user.is_admin:
+        return
     limit = user.monthly_token_limit if user.monthly_token_limit is not None else settings.DEFAULT_MONTHLY_TOKEN_LIMIT
     if limit == 0:
         return  # unlimited
