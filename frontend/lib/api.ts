@@ -110,6 +110,8 @@ export const contentApi = {
     api.post<GeneratedContent>(`/content/${id}/re-edit`, { instruction }),
   adapt: (id: number, platform: Platform) =>
     api.post<GeneratedContent>(`/content/${id}/adapt`, { platform }),
+  summarize: (id: number, platform: Platform) =>
+    api.post<GeneratedContent>(`/content/${id}/summarize`, { platform }),
   delete: (id: number) => api.delete(`/content/${id}`),
   rate: (id: number, rating: number) => api.post<GeneratedContent>(`/content/${id}/rate`, { rating }),
 };

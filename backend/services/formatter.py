@@ -18,8 +18,15 @@ _MARKDOWN_ITALIC  = re.compile(r'\*(.+?)\*')         # *text* → text
 _EXCESS_NEWLINES  = re.compile(r'\n{3,}')            # 3+ newlines → 2
 
 
+# Threads are stored as tweets joined by a "---" line (see generate_long_form)
+THREAD_SEPARATOR = "\n\n---\n\n"
+
+
 def sanitize_body(text: str) -> str:
     """Strip AI-isms: em-dashes, curly quotes, markdown bold/italic, excess whitespace."""
+    if THREAD_SEPARATOR in text:
+        # Clean each tweet on its own so the double-hyphen rule can't flatten the separator
+        return THREAD_SEPARATOR.join(sanitize_body(part) for part in text.split(THREAD_SEPARATOR))
     text = _EM_DASH_SPACED.sub(', ', text)
     text = _EN_DASH_SPACED.sub(', ', text)
     text = _DOUBLE_HYPHEN.sub('-', text)
@@ -76,16 +83,31 @@ def _split_thread(text: str, char_limit: int = 270) -> list[str]:
     return [f"{i+1}/{len(tweets)} {t}" for i, t in enumerate(tweets)]
 
 
+_SENTENCE_BREAK = re.compile(r'(?<=[.!?])\s+')
+
+
+def space_paragraphs(text: str) -> str:
+    """X layout: each paragraph on its own, with an empty line between paragraphs.
+
+    Output that comes back as one unbroken block is split into one sentence per paragraph.
+    """
+    paragraphs = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(paragraphs) == 1:
+        paragraphs = [s for s in _SENTENCE_BREAK.split(paragraphs[0]) if s]
+    return "\n\n".join(paragraphs)
+
+
 def format_for_twitter(content: str, content_type: str) -> FormattedContent:
     if content_type == "thread":
         # content is pre-formatted as "1/N text\n\n---\n\n2/N text..." by the generator
-        tweets = [t.strip() for t in content.split("\n\n---\n\n") if t.strip()]
+        tweets = [t.strip() for t in content.split(THREAD_SEPARATOR) if t.strip()]
         return FormattedContent(
             platform="twitter",
             content_type="thread",
             body=content,
             meta={"tweet_count": len(tweets), "tweets": tweets},
         )
+    content = space_paragraphs(content)
     limit = TWITTER_LIMITS.get(content_type)
     if limit and len(content) > limit:
         content = content[:limit - 3] + "..."

@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, desc, func
 from api.deps import CurrentUser, DB
 from db.models.content import GeneratedContent, ContentVersion
-from services.generator import re_edit_content, adapt_to_platform
+from services.generator import re_edit_content, adapt_to_platform, summarize_for_platform
 from services.persona import get_best_persona_context
 
 router = APIRouter(prefix="/content", tags=["content"])
@@ -199,6 +199,54 @@ async def adapt_content(content_id: int, body: AdaptRequest, current_user: Curre
         meta=formatted.meta,
         parent_id=original.id,
         version=original.version + 1,
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return _serialize(record)
+
+
+class SummarizeRequest(BaseModel):
+    platform: str
+
+
+@router.post("/{content_id}/summarize")
+async def summarize_content(content_id: int, body: SummarizeRequest, current_user: CurrentUser, db: DB):
+    """Condense a post into one short post formatted for the chosen platform."""
+    if body.platform not in VALID_PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"Invalid platform. Choose from: {VALID_PLATFORMS}")
+
+    result = await db.execute(
+        select(GeneratedContent).where(
+            GeneratedContent.id == content_id,
+            GeneratedContent.user_id == current_user.id,
+        )
+    )
+    original = result.scalar_one_or_none()
+    if not original:
+        raise HTTPException(status_code=404, detail="Content not found")
+
+    persona_context = await get_best_persona_context(current_user.id, original.title or original.content[:100])
+    formatted = await summarize_for_platform(
+        content=original.content,
+        title=original.title or "",
+        platform=body.platform,
+        persona_context=persona_context,
+    )
+    if not formatted.body:
+        raise HTTPException(status_code=502, detail="The summary came back empty. Please try again.")
+
+    # Saved as its own post rather than a child (children are hidden from History);
+    # meta.summary_of links it back to the post it came from.
+    record = GeneratedContent(
+        user_id=current_user.id,
+        topic_id=original.topic_id,
+        platform=body.platform,
+        content_type="idea",
+        title=formatted.meta.get("title") or original.title,
+        content=formatted.body,
+        meta={**formatted.meta, "summary_of": original.id},
+        version=1,
     )
     db.add(record)
     await db.commit()

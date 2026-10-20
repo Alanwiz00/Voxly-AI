@@ -1,18 +1,38 @@
 import json
 from core.config import settings
 from services.llm import llm_complete
-from services.formatter import format_content, sanitize_body, FormattedContent
+from services.formatter import format_content, sanitize_body, space_paragraphs, FormattedContent
+
+# How X posts are laid out: short paragraphs, each followed by an empty line.
+X_FORMAT_TEMPLATE = (
+    "FORMAT TEMPLATE (X):\n"
+    "<hook: one short line that makes people stop scrolling>\n"
+    "\n"
+    "<context: one or two sentences>\n"
+    "\n"
+    "<detail: one or two sentences>\n"
+    "\n"
+    "<detail or proof: one or two sentences>\n"
+    "\n"
+    "<closing line: the takeaway, a key date or time, or what to do next>\n"
+    "\n"
+    "One idea per paragraph, one or two sentences each. "
+    "Put an empty line between every paragraph: never two paragraphs on back-to-back lines, "
+    "never one unbroken block. Longer posts add more paragraphs in the same layout. "
+    "In a thread, use this layout inside each tweet."
+)
 
 PLATFORM_INSTRUCTIONS = {
     "twitter": (
         "Twitter/X (X Premium). "
         "Post ideas: aim for 400-800 characters — substantive but focused, not a wall of text. "
         "Long-form: up to 2,500 characters. Articles: up to 3,000 characters. "
-        "Follow the FORMAT TEMPLATE in the task exactly — structure, line breaks, and length. "
+        "Follow the FORMAT TEMPLATE below exactly — structure, line breaks, and length. "
         "Every fact must be traceable to the source material. No invented context. "
         "Plain text only — no emojis, no hashtags, no markdown symbols like * or **. "
         "NEVER mention a media outlet, publication, or website by name. "
-        "NEVER ask a question. Declarative statements only. Never start with 'I'."
+        "NEVER ask a question. Declarative statements only. Never start with 'I'.\n\n"
+        + X_FORMAT_TEMPLATE
     ),
     "instagram": (
         "Instagram. The first line must stop the scroll before 'more' is tapped. "
@@ -422,6 +442,50 @@ async def adapt_to_platform(
     return formatted
 
 
+# Summary length per platform, taken from PLATFORM_INSTRUCTIONS where it sets one.
+SUMMARY_LENGTHS = {
+    "twitter": "400-800 characters, as an X post idea",
+    "facebook": "100-300 words",
+}
+
+
+async def summarize_for_platform(
+    content: str,
+    title: str,
+    platform: str,
+    persona_context: str,
+) -> FormattedContent:
+    """Condense an existing post into one short post in the target platform's format."""
+    system = _build_system_prompt(platform, persona_context)
+    length = SUMMARY_LENGTHS.get(platform, "clearly shorter than the original")
+    user_msg = (
+        f"Original post:\n{content}\n\n"
+        f"Task: Summarize this into ONE standalone post for {platform}. "
+        "Keep the core idea and its strongest supporting points. Cut everything else. "
+        "If the original is a thread, merge it into a single post with no numbering. "
+        f"Length: {length}. "
+        "Use only facts, figures and claims that appear in the original post. Add nothing new.\n\n"
+        + (
+            'Return JSON: {"title": "short descriptive title", "body": "...", "hashtags": ["tag1", "tag2"]}'
+            if platform == "instagram"
+            else 'Return JSON: {"title": "short descriptive title", "body": "..."}'
+        )
+    )
+
+    text, _tokens = await llm_complete(
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
+        temperature=0.6,
+        max_tokens=2048,
+    )
+
+    data = json.loads(text)
+    hashtags = data.get("hashtags", []) if platform == "instagram" else []
+    # "idea" applies the short-post limits, e.g. the 800-character cap on X
+    formatted = format_content(platform, data.get("body", ""), "idea", hashtags)
+    formatted.meta.update({"title": data.get("title") or title, "hashtags": hashtags})
+    return formatted
+
+
 async def re_edit_content(original: str, platform: str, instruction: str, persona_context: str) -> str:
     system = _build_system_prompt(platform, persona_context)
     user_msg = (
@@ -438,4 +502,8 @@ async def re_edit_content(original: str, platform: str, instruction: str, person
     )
 
     data = json.loads(text)
-    return sanitize_body(data.get("body", original))
+    body = sanitize_body(data.get("body", original))
+    # Re-edits skip format_content, so keep X's paragraph spacing here (threads keep their own separators)
+    if platform == "twitter" and "\n\n---\n\n" not in body:
+        body = space_paragraphs(body)
+    return body

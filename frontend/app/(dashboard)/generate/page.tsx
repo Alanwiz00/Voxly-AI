@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
-import { Sparkles, Upload, Globe, FileText, Copy, Check } from "lucide-react";
+import { Sparkles, Upload, Globe, FileText, Copy, Check, ListCollapse } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { topicsApi, generateApi, personaApi, contentApi, type Topic, type GeneratedContent, type Platform, type ContentType, type Persona } from "@/lib/api";
 import { PLATFORM_LABELS, PLATFORM_COLORS, CONTENT_TYPE_LABELS, cn } from "@/lib/utils";
 import RatingButtons from "@/components/rating-buttons";
+import SummarizePanel from "@/components/summarize-panel";
 
 const PLATFORMS: Platform[] = ["twitter", "instagram", "facebook", "telegram"];
 const CONTENT_TYPES: ContentType[] = ["idea", "long_form", "thread", "article"];
@@ -31,6 +32,7 @@ export default function GeneratePage() {
   const [results, setResults] = useState<GeneratedContent[]>([]);
   const [copied, setCopied] = useState<number | null>(null);
   const [ratings, setRatings] = useState<Record<number, number | null>>({});
+  const [summarizingId, setSummarizingId] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [loadingTopics, setLoadingTopics] = useState(true);
@@ -58,6 +60,15 @@ export default function GeneratePage() {
       // revert on error
       setRatings((prev) => ({ ...prev, [id]: undefined as unknown as null }));
     }
+  };
+
+  // Show the summary right below the post it came from
+  const addSummary = (sourceId: number, summary: GeneratedContent) => {
+    setResults((prev) => {
+      const i = prev.findIndex((r) => r.id === sourceId);
+      return [...prev.slice(0, i + 1), summary, ...prev.slice(i + 1)];
+    });
+    setSummarizingId(null);
   };
 
   const generate = async () => {
@@ -346,6 +357,7 @@ export default function GeneratePage() {
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <Badge className={PLATFORM_COLORS[item.platform]}>{PLATFORM_LABELS[item.platform]}</Badge>
                       <Badge variant="outline">{CONTENT_TYPE_LABELS[item.content_type]}</Badge>
+                      {meta?.summary_of !== undefined && <Badge variant="secondary">Summary</Badge>}
                       {score !== undefined && (
                         <span
                           className={cn(
@@ -373,6 +385,15 @@ export default function GeneratePage() {
                     <Button variant="ghost" size="icon" onClick={() => copy(item.id, item.content)}>
                       {copied === item.id ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Summarize"
+                      aria-label="Summarize"
+                      onClick={() => setSummarizingId(summarizingId === item.id ? null : item.id)}
+                    >
+                      <ListCollapse className="w-4 h-4" />
+                    </Button>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -397,6 +418,15 @@ export default function GeneratePage() {
                     <p className="text-xs text-muted-foreground border-t pt-2">
                       <span className="font-medium">Why this works:</span> {scoreReason}
                     </p>
+                  )}
+                  {summarizingId === item.id && (
+                    <div className="border-t">
+                      <SummarizePanel
+                        contentId={item.id}
+                        onSummarized={(summary) => addSummary(item.id, summary)}
+                        onClose={() => setSummarizingId(null)}
+                      />
+                    </div>
                   )}
                 </CardContent>
               </Card>

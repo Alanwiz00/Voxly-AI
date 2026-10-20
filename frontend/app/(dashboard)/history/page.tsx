@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Copy, Check, Pencil, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { Copy, Check, Pencil, Trash2, ChevronDown, ChevronUp, ListCollapse } from "lucide-react";
 import RatingButtons from "@/components/rating-buttons";
+import SummarizePanel from "@/components/summarize-panel";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ export default function HistoryPage() {
   const [editInstruction, setEditInstruction] = useState("");
   const [editLoading, setEditLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [summarizingId, setSummarizingId] = useState<number | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -145,6 +147,7 @@ export default function HistoryPage() {
                       <Badge variant="outline">{CONTENT_TYPE_LABELS[item.content_type]}</Badge>
                       {item.version > 1 && <Badge variant="secondary">v{item.version}</Badge>}
                       {item.parent_id && <Badge variant="outline" className="text-indigo-600 dark:text-indigo-400">Re-edit</Badge>}
+                      {item.meta?.summary_of !== undefined && <Badge variant="secondary">Summary</Badge>}
                     </div>
                     {item.title && <p className="font-medium mt-1 truncate text-foreground">{item.title}</p>}
                     <p className="text-xs text-muted-foreground mt-0.5">
@@ -166,6 +169,15 @@ export default function HistoryPage() {
                       onClick={() => { setEditingId(editingId === item.id ? null : item.id); setEditInstruction(""); }}
                     >
                       <Pencil className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Summarize"
+                      aria-label="Summarize"
+                      onClick={() => setSummarizingId(summarizingId === item.id ? null : item.id)}
+                    >
+                      <ListCollapse className="w-4 h-4" />
                     </Button>
                     <Button variant="ghost" size="icon" onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}>
                       {expandedId === item.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -202,6 +214,19 @@ export default function HistoryPage() {
                       <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
                     </div>
                   </div>
+                </CardContent>
+              )}
+
+              {summarizingId === item.id && (
+                <CardContent className="pt-0 border-t">
+                  <SummarizePanel
+                    contentId={item.id}
+                    onSummarized={(summary) => {
+                      setItems((prev) => [summary, ...prev]);
+                      setSummarizingId(null);
+                    }}
+                    onClose={() => setSummarizingId(null)}
+                  />
                 </CardContent>
               )}
             </Card>
