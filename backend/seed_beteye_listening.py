@@ -18,8 +18,10 @@ import asyncio
 import sys
 
 from sqlalchemy import select
+from sqlalchemy.engine import make_url
 
 from core.config import settings
+from main import _migrate_db
 from db.models.listening import ListeningCampaign, OutreachTemplate
 from db.models.user import User
 from db.postgres import AsyncSessionLocal, init_db
@@ -144,7 +146,12 @@ def check_presets() -> list[str]:
 
 
 async def seed(owner_email: str) -> None:
+    # Say where this is writing: the Listening page only shows campaigns from the
+    # database the deployed backend uses.
+    url = make_url(settings.DATABASE_URL)
+    print(f"Seeding database {url.database} on {url.host}:{url.port or 5432}\n")
     await init_db()
+    await _migrate_db()  # same column updates the backend applies on startup
     async with AsyncSessionLocal() as db:
         owner = (await db.execute(select(User).where(User.email == owner_email))).scalar_one_or_none()
         if not owner or not owner.is_admin:

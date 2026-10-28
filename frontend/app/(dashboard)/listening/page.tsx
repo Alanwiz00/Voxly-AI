@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
-  listeningApi, usersApi,
+  api, listeningApi, usersApi,
   type ListeningCampaign, type ListeningCampaignInput, type OutreachTemplate, type OutreachIntent,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -42,6 +42,17 @@ const EMPTY_CAMPAIGN: ListeningCampaignInput = {
 
 const errorDetail = (err: unknown, fallback: string) =>
   (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback;
+
+// Say why campaigns didn't load, instead of showing an empty list.
+const describeLoadError = (err: unknown) => {
+  const e = err as { response?: { status?: number; data?: { detail?: string } } };
+  const base = api.defaults.baseURL;
+  if (!e.response) return `Couldn't reach the Voxly API at ${base}. Check that the backend is running and NEXT_PUBLIC_API_URL points to it.`;
+  if (e.response.status === 404) {
+    return `The API at ${base} has no Listening routes (404), so it's running a build from before Listening. Redeploy the backend.`;
+  }
+  return `Couldn't load campaigns (${e.response.status}): ${e.response.data?.detail ?? "unknown error"}`;
+};
 
 const splitList = (value: string) => value.split(",").map((v) => v.trim()).filter(Boolean);
 
@@ -332,18 +343,24 @@ export default function ListeningPage() {
   const [campaigns, setCampaigns] = useState<ListeningCampaign[]>([]);
   const [spend, setSpend] = useState({ used: 0, budget: 0, xConfigured: true });
   const [creating, setCreating] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = async () => {
-    const r = (await listeningApi.campaigns()).data;
-    setCampaigns(r.campaigns);
-    setSpend({ used: r.spend_this_month_usd, budget: r.monthly_budget_usd, xConfigured: r.x_configured });
+    try {
+      const r = (await listeningApi.campaigns()).data;
+      setCampaigns(r.campaigns);
+      setSpend({ used: r.spend_this_month_usd, budget: r.monthly_budget_usd, xConfigured: r.x_configured });
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(describeLoadError(err));
+    }
   };
 
   useEffect(() => {
     usersApi.me().then((r) => {
       setIsAdmin(r.data.is_admin);
       if (r.data.is_admin) void load();
-    }).catch(() => setIsAdmin(false));
+    }).catch((err) => setLoadError(describeLoadError(err)));
   }, []);
 
   const pauseAll = async () => {
@@ -373,6 +390,12 @@ export default function ListeningPage() {
           <Button size="sm" variant="outline" className="text-destructive" onClick={pauseAll}><Pause className="w-4 h-4 mr-1.5" />Pause all</Button>
         </div>
       </div>
+
+      {loadError && (
+        <p className="text-sm rounded-md border border-red-300 bg-red-50 dark:bg-red-950/30 px-3 py-2 text-red-800 dark:text-red-300">
+          {loadError}
+        </p>
+      )}
 
       {!spend.xConfigured && (
         <p className="text-sm rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-amber-800 dark:text-amber-300">
@@ -410,6 +433,13 @@ export default function ListeningPage() {
           </CardContent>
         )}
       </Card>
+
+      {isAdmin && !loadError && campaigns.length === 0 && (
+        <p className="text-sm text-muted-foreground text-center py-6">
+          No campaigns in this database yet. Create one above, or run{" "}
+          <code className="text-xs">python seed_beteye_listening.py</code> in the backend container.
+        </p>
+      )}
 
       {campaigns.map((c) => (
         <CampaignCard key={c.id} campaign={c} onChange={(updated) => setCampaigns((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))} />
