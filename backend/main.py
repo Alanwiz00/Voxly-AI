@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from core.config import settings
 from db.postgres import init_db
 from db.qdrant import ensure_collections
-from api.routes import auth, users, topics, generate, content, persona, api_keys, analyze
+from api.routes import auth, users, topics, generate, content, persona, api_keys, analyze, listening
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,9 @@ async def _migrate_db() -> None:
               )
             """,
             "ALTER TABLE generated_content ADD COLUMN IF NOT EXISTS rating SMALLINT",
+            # Listening: per-campaign search interval (tables created by create_all on first boot)
+            "ALTER TABLE listening_campaigns ADD COLUMN IF NOT EXISTS poll_every_minutes INTEGER DEFAULT 10",
+            "ALTER TABLE listening_campaigns ADD COLUMN IF NOT EXISTS last_polled_at TIMESTAMPTZ",
             """
             CREATE TABLE IF NOT EXISTS api_keys (
                 id SERIAL PRIMARY KEY,
@@ -110,6 +113,7 @@ app.include_router(content.router)
 app.include_router(persona.router)
 app.include_router(api_keys.router)
 app.include_router(analyze.router)
+app.include_router(listening.router)
 
 
 # Without this, any unhandled exception (a missing LLM provider key, a

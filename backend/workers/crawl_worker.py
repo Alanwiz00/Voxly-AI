@@ -19,7 +19,12 @@ from db.qdrant import upsert_points, delete_by_payload
 from services.crawl import crawl_topic
 from services.sentiment import summarize_and_analyze, get_embeddings
 
-celery_app = Celery("content_generator", broker=settings.REDIS_URL, backend=settings.REDIS_URL)
+celery_app = Celery(
+    "content_generator",
+    broker=settings.REDIS_URL,
+    backend=settings.REDIS_URL,
+    include=["workers.listening_worker"],  # imported lazily by the worker, so no import cycle
+)
 celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
@@ -41,6 +46,18 @@ celery_app.conf.update(
         },
         "purge-sentiment-cache": {
             "task": "workers.crawl_worker.purge_stale_sentiment_cache",
+            "schedule": timedelta(hours=24),
+        },
+        "listening-poll-campaigns": {
+            "task": "workers.listening_worker.poll_all_campaigns",
+            "schedule": timedelta(minutes=10),
+        },
+        "listening-poll-mentions": {
+            "task": "workers.listening_worker.poll_outreach_mentions",
+            "schedule": timedelta(minutes=15),
+        },
+        "listening-purge": {
+            "task": "workers.listening_worker.purge_listening",
             "schedule": timedelta(hours=24),
         },
     },

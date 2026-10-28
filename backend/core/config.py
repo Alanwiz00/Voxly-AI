@@ -57,5 +57,21 @@ class Settings(BaseSettings):
     # Per-user token budget (0 = unlimited). Override per-user in the DB.
     DEFAULT_MONTHLY_TOKEN_LIMIT: int = 100_000
 
+    # Listening & outreach on X. Prices are X pay-per-use rates (USD); X says they can
+    # change, so keep them in sync with the developer console.
+    X_BEARER_TOKEN: str = ""
+    X_API_BASE_URL: str = "https://api.x.com"
+    X_ACCOUNT_USER_ID: str = ""  # the account that posts replies; its mentions are read for replies
+    X_PRICE_POST_READ: float = 0.005
+    X_PRICE_USER_READ: float = 0.010
+    X_PRICE_COUNTS_REQUEST: float = 0.005
+    LISTENING_MONTHLY_BUDGET_USD: float = 15.0  # hard stop across all campaigns
+    X_QUERY_MAX_CHARS: int = 512  # X recent-search limit on self-serve access (enterprise: 4096)
+
+    # BetEye: proof for drafts, and signed signup events back to Voxly
+    BETEYE_API_URL: str = ""
+    BETEYE_OUTREACH_KEY: str = ""
+    LISTENING_WEBHOOK_SECRET: str = ""
+
 
 settings = Settings()

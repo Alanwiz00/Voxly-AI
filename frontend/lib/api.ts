@@ -157,3 +157,114 @@ export const apiKeysApi = {
   create: (name: string) => api.post<ApiKeyRecord>("/api-keys/", { name }),
   revoke: (id: number) => api.delete(`/api-keys/${id}`),
 };
+
+// Listening & outreach (admin only)
+export type OutreachIntent = "any" | "seeking_live_alerts" | "seeking_tips" | "tipster_complaint" | "odds_discussion";
+
+export interface ListeningCampaign {
+  id: number;
+  name: string;
+  x_query: string;
+  harm_terms: string[];
+  allowed_markets: string[];
+  link_base: string;
+  daily_cap: number;
+  monthly_budget_usd: number;
+  max_results_per_poll: number;
+  poll_every_minutes: number;
+  last_polled_at: string | null;
+  status: "active" | "paused";
+  spend_this_month_usd: number;
+  pace_allowance_usd: number;
+  queued: number;
+  sent_today: number;
+  created_at: string | null;
+}
+
+export type ListeningCampaignInput = Pick<
+  ListeningCampaign,
+  "name" | "x_query" | "harm_terms" | "allowed_markets" | "link_base" | "daily_cap" | "monthly_budget_usd" | "max_results_per_poll" | "poll_every_minutes"
+>;
+
+export interface OutreachTemplate {
+  id: number;
+  campaign_id: number;
+  name: string;
+  intent: OutreachIntent;
+  body: string;
+  arcon_cert_no: string | null;
+  approved: boolean;
+  approved_at: string | null;
+  active: boolean;
+}
+
+export interface OutreachProof {
+  alertId: string;
+  match: string;
+  alertType: string;
+  minuteAtFire: number | null;
+  firedAt: string | null;
+  outcome: string;
+  proofUrl: string | null;
+}
+
+export interface OutreachDraft {
+  id: number;
+  code: string;
+  text: string | null;
+  proof: OutreachProof | null;
+  status: "queued" | "sent" | "skipped";
+  edited: boolean;
+  sent_at: string | null;
+  reply_url: string | null;
+  post: {
+    id: string;
+    author_id: string | null;
+    author_handle: string | null;
+    text: string | null;
+    posted_at: string | null;
+    matched_terms: string[];
+    verdict: { intent?: string; market?: string; confidence?: number; teams?: string[] } | null;
+  };
+}
+
+export interface CampaignStats {
+  posts_found: number;
+  stages: Record<string, number>;
+  drop_reasons: Record<string, number>;
+  sent: number;
+  events: Record<string, number>;
+  spend_this_month_usd: number;
+  cost_per_reply_usd: number | null;
+}
+
+export const listeningApi = {
+  campaigns: () =>
+    api.get<{ campaigns: ListeningCampaign[]; spend_this_month_usd: number; monthly_budget_usd: number; x_configured: boolean }>(
+      "/listening/campaigns"
+    ),
+  createCampaign: (data: ListeningCampaignInput) => api.post<ListeningCampaign>("/listening/campaigns", data),
+  updateCampaign: (id: number, data: Partial<ListeningCampaignInput & { status: "active" | "paused" }>) =>
+    api.patch<ListeningCampaign>(`/listening/campaigns/${id}`, data),
+  pauseAll: () => api.post<{ paused: number }>("/listening/pause-all"),
+  size: (id: number) =>
+    api.post<{ posts_last_7_days: number; est_posts_per_month: number; est_read_cost_per_month_usd: number }>(
+      `/listening/campaigns/${id}/size`
+    ),
+  pollNow: (id: number) => api.post<{ read: number; dropped: number; drafted: number }>(`/listening/campaigns/${id}/poll`),
+  stats: (id: number) => api.get<CampaignStats>(`/listening/campaigns/${id}/stats`),
+  templates: (campaignId: number) => api.get<OutreachTemplate[]>(`/listening/campaigns/${campaignId}/templates`),
+  createTemplate: (
+    campaignId: number,
+    data: { name: string; intent: OutreachIntent; body: string; arcon_cert_no?: string | null }
+  ) => api.post<OutreachTemplate>(`/listening/campaigns/${campaignId}/templates`, data),
+  updateTemplate: (id: number, data: Partial<Pick<OutreachTemplate, "name" | "intent" | "body" | "arcon_cert_no" | "active">>) =>
+    api.patch<OutreachTemplate>(`/listening/templates/${id}`, data),
+  queue: (campaignId: number) =>
+    api.get<{ campaign: { id: number; name: string; status: string }; daily_cap: number; sent_today: number; drafts: OutreachDraft[] }>(
+      `/listening/campaigns/${campaignId}/queue`
+    ),
+  editDraft: (id: number, text: string) => api.patch<OutreachDraft>(`/listening/drafts/${id}`, { text }),
+  markSent: (id: number, reply_url?: string) => api.post<OutreachDraft>(`/listening/drafts/${id}/sent`, { reply_url: reply_url || null }),
+  skip: (id: number, do_not_contact = false) => api.post<OutreachDraft>(`/listening/drafts/${id}/skip`, { do_not_contact }),
+};

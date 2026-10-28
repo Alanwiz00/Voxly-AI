@@ -2,7 +2,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
-import { LayoutDashboard, Sparkles, History, Settings, LogOut, ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
+import { LayoutDashboard, Sparkles, History, Settings, LogOut, ChevronRight, Radar } from "lucide-react";
+import { usersApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import ThemeToggle from "./theme-toggle";
@@ -14,6 +16,8 @@ const NAV_ITEMS = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
+const ADMIN_NAV_ITEMS = [{ href: "/listening", label: "Listening", icon: Radar }];
+
 interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
@@ -22,6 +26,11 @@ interface SidebarProps {
 export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    usersApi.me().then((r) => setIsAdmin(r.data.is_admin)).catch(() => setIsAdmin(false));
+  }, []);
 
   return (
     <aside
@@ -43,7 +52,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       </div>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+        {[...NAV_ITEMS, ...(isAdmin ? ADMIN_NAV_ITEMS : [])].map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(href + "/");
           return (
             <Link
