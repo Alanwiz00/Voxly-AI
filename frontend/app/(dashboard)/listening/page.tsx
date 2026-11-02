@@ -86,7 +86,7 @@ function CampaignForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-sm">
           <span className="font-medium">Name</span>
-          <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="BetEye live alerts, Nigeria" />
+          <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="BET EYE live alerts, Nigeria" />
         </label>
         <label className="space-y-1 text-sm">
           <span className="font-medium">Signup link</span>
@@ -149,6 +149,36 @@ function CampaignForm({
   );
 }
 
+// Approving an existing template (e.g. a seeded one) once ARCON issues its number.
+// Clearing the number and saving withdraws approval, e.g. if ARCON revokes it.
+function CertField({ template, onSaved }: { template: OutreachTemplate; onSaved: (t: OutreachTemplate) => void }) {
+  const [cert, setCert] = useState(template.arcon_cert_no ?? "");
+  const [saving, setSaving] = useState(false);
+  const changed = cert.trim() !== (template.arcon_cert_no ?? "");
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await listeningApi.updateTemplate(template.id, { arcon_cert_no: cert.trim() || null });
+      onSaved(res.data);
+      toast.success(res.data.approved ? "Template approved" : "Approval removed: this template won't draft");
+    } catch (err) {
+      toast.error(errorDetail(err, "Couldn't save the ARCON number"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex gap-2">
+      <Input className="h-8 text-xs" placeholder="ARCON certificate number" value={cert} onChange={(e) => setCert(e.target.value)} />
+      <Button size="sm" variant="outline" onClick={save} disabled={saving || !changed}>
+        {saving ? "Saving..." : "Save number"}
+      </Button>
+    </div>
+  );
+}
+
 function TemplatesPanel({ campaignId }: { campaignId: number }) {
   const [templates, setTemplates] = useState<OutreachTemplate[]>([]);
   const [name, setName] = useState("");
@@ -199,6 +229,7 @@ function TemplatesPanel({ campaignId }: { campaignId: number }) {
             </Button>
           </div>
           <pre className="whitespace-pre-wrap text-xs font-sans text-muted-foreground bg-muted/50 rounded p-2">{t.body}</pre>
+          <CertField template={t} onSaved={(u) => setTemplates((prev) => prev.map((x) => (x.id === u.id ? u : x)))} />
         </div>
       ))}
       <div className="rounded-md border border-dashed p-3 space-y-2">
@@ -213,10 +244,10 @@ function TemplatesPanel({ campaignId }: { campaignId: number }) {
           rows={4}
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          placeholder={"BetEye flagged a {alert_type} at {minute}' in {match}, and it {outcome}.\n\nFree live alerts on Telegram: {link}\n\n18+ · Play responsibly"}
+          placeholder={"BET EYE flagged a {alert_type} at {minute}' in {match}, and it {outcome}.\n\nFree live alerts on Telegram: {link}\n\n18+ · For information only"}
         />
         <p className="text-xs text-muted-foreground">
-          Slots: {"{match} {alert_type} {minute} {outcome} {proof_url} {link}"}. Must include {"{link}"}, &quot;18+&quot; and &quot;Play responsibly&quot;.
+          Slots: {"{match} {alert_type} {minute} {outcome} {proof_url} {link}"}. Must include {"{link}"} and the footer &quot;18+ · For information only&quot;. No betting language: BET EYE is not a betting service.
           Changing approved wording clears its approval.
         </p>
         <Input placeholder="ARCON certificate number (leave empty until approved)" value={cert} onChange={(e) => setCert(e.target.value)} />

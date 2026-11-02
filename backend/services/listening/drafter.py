@@ -7,7 +7,7 @@ import re
 import secrets
 import string
 
-from services.listening.filters import banned_claims, has_responsible_footer
+from services.listening.filters import REQUIRED_FOOTER, banned_claims, has_required_footer, off_brand_language
 
 SLOTS = {"match", "alert_type", "minute", "outcome", "proof_url", "link"}
 PROOF_SLOTS = {"match", "alert_type", "minute", "outcome", "proof_url"}
@@ -28,11 +28,7 @@ def validate_template(body: str, intent: str) -> list[str]:
         errors.append(f"Unknown slots: {', '.join(sorted(unknown))}. Allowed: {', '.join(sorted(SLOTS))}")
     if "link" not in template_slots(body):
         errors.append("Template must include {link} so signups can be traced")
-    if not has_responsible_footer(body):
-        errors.append('Template must include "18+" and "Play responsibly"')
-    claims = banned_claims(body)
-    if claims:
-        errors.append(f"Banned claims: {', '.join(claims)}")
+    errors.extend(_copy_problems(body, "Template"))
     if intent not in INTENTS:
         errors.append(f"Intent must be one of: {', '.join(sorted(INTENTS))}")
     return errors
@@ -78,18 +74,34 @@ def render(template_body: str, proof: dict | None, link: str) -> str:
             "match": proof.get("match", ""),
             "alert_type": _humanise(str(proof.get("alertType", ""))),
             "minute": str(proof.get("minuteAtFire", "")),
-            "outcome": "won" if proof.get("outcome") == "WIN" else str(proof.get("outcome", "")).lower(),
+            # "hit" and "miss", as on BET EYE's results page.
+            "outcome": {"WIN": "hit", "LOSS": "missed"}.get(str(proof.get("outcome")), str(proof.get("outcome", "")).lower()),
             "proof_url": proof.get("proofUrl") or "",
         })
     return _SLOT_RE.sub(lambda m: values.get(m.group(1), ""), template_body).strip()
 
 
-def check_draft(text: str) -> list[str]:
-    """Re-run on every draft and every reviewer edit."""
+_URL_RE = re.compile(r"https?://\S+")
+_BRAND_SPELLING_RE = re.compile(r"\bbet\s?eye\b", re.I)
+
+
+def _copy_problems(text: str, what: str) -> list[str]:
+    """BET EYE's rules for anything it says in public."""
     errors = []
-    if not has_responsible_footer(text):
-        errors.append('Draft must keep "18+" and "Play responsibly"')
+    misspelt = {m.group(0) for m in _BRAND_SPELLING_RE.finditer(_URL_RE.sub(" ", text)) if m.group(0) != "BET EYE"}
+    if misspelt:
+        errors.append(f'Write the brand name as "BET EYE", not {", ".join(sorted(misspelt))}')
+    if not has_required_footer(text):
+        errors.append(f'{what} must include the footer "{REQUIRED_FOOTER}"')
     claims = banned_claims(text)
     if claims:
         errors.append(f"Banned claims: {', '.join(claims)}")
+    off_brand = off_brand_language(text)
+    if off_brand:
+        errors.append(f"Betting language (BET EYE is not a betting service): {', '.join(off_brand)}")
     return errors
+
+
+def check_draft(text: str) -> list[str]:
+    """Re-run on every draft and every reviewer edit."""
+    return _copy_problems(text, "Draft")

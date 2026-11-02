@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/usr/bin/grep -n \"^import\\\\|^from\" services/listening/filters.py services/listening/drafter.py)",
+      "Bash(/usr/bin/grep -n \"def edit_draft\\\\|drafts/{draft_id}\\\\\"\\\\|@router.patch\\(\\\\\"/drafts\\\\|check_draft\\\\|body.text\\\\|draft.text\" api/routes/listening.py)",
+      "Bash(/usr/bin/grep -rn -i \"free tier\\\\|freeTier\\\\|FREE_\\\\|trial\\\\|price.*ngn\\\\|NGN\\\\|plan:\" server/agent/support_knowledge.ts)",
+      "Bash(/usr/bin/grep -n \"export.*buildPublicProof\" -A45 agent/outreach/receipts.ts)",
+      "Bash(/usr/bin/grep -n -i -E \"take|limit|where|status|tracking|days|since|outcome|orderBy|function|=>\")",
+      "Bash(/usr/bin/grep -n \"api/public/proof\" -A12 agent/index.ts)",
+      "Bash(/usr/bin/grep -rn -o -E \"'\\(GOAL|CORNER|CARD|OVER|BTTS|NEXT_GOAL|LATE_GOAL\\)[A-Z_]*'\" agent/*.ts)",
+      "Bash(/usr/bin/grep -rn -o -E \"'[A-Z_]*CARD[A-Z_]*'\" agent/*.ts)",
+      "Bash(/usr/bin/grep -n \"PROOF_LOOKBACK_DAYS\\\\s*=\" agent/outreach/receipts.ts)",
+      "Bash(/usr/bin/grep -rn -i -E \"\\(alertType|type\\)\\\\s*[:=]\\\\s*'[A-Z_]*CARD|'\\(RED|YELLOW\\)_CARD[A-Z_]*'|CARDS_OVER|card_alert\" --include=*.ts .)",
+      "Bash(/usr/bin/grep -n \"enum AlertType\" -A30 prisma/schema.prisma)",
+      "Bash(/usr/bin/grep -n \"ping_goal\\\\|ping_red_card\\\\|ping_corner\" agent/index.ts)",
+      "Bash(/usr/bin/grep -n \"BANNED_CLAIMS\" -A14 services/listening/filters.py)",
+      "Bash(/usr/bin/grep -n \"^def build_link\\\\|^def _humanise\\\\|^def new_code\" -A6 services/listening/drafter.py)",
+      "Bash(/usr/bin/grep -n -i \"market\" services/listening/pipeline.py)",
+      "WebFetch(domain:www.brandtimes.com.ng)",
+      "WebFetch(domain:marketingedge.com.ng)",
+      "Bash(curl -s https://pypi.org/pypi/pip/json)",
+      "Bash(python3 -c ' *)",
+      "mcp__claude_ai_Claude_Docs__create"
+    ]
+  }
+}

@@ -75,9 +75,48 @@ def banned_claims(text: str) -> list[str]:
     return find_terms(text, BANNED_CLAIMS)
 
 
-def has_responsible_footer(text: str) -> bool:
+# BET EYE is a live football intelligence app, not a betting service: every reply
+# it sends carries this footer, the same wording as the app and website.
+REQUIRED_FOOTER = "18+ · For information only"
+
+
+def has_required_footer(text: str) -> bool:
     norm = _normalise(text)
-    return "18+" in norm and "play responsibly" in norm
+    return "18+" in norm and "for information only" in norm
+
+
+# BET EYE's brand voice check, kept in step with server/agent/brand_voice.ts in the
+# BET EYE repo (OFF_BRAND_PATTERNS). Narrow where football and betting share words:
+# "high stakes", "edge of the box", "came back" and "transfer market" are fine.
+_OFF_BRAND_PATTERNS = [
+    ("bet", re.compile(r"\bbet(s|ting|tor|tors|slip|slips)?\b", re.I)),
+    ("wager", re.compile(r"\bwager", re.I)),
+    ("gamble", re.compile(r"\bgambl", re.I)),
+    ("bookmaker", re.compile(r"\bbook(maker|makers|ie|ies)\b", re.I)),
+    ("odds", re.compile(r"\bodds\b", re.I)),
+    ("price", re.compile(r"@\s?\d+(\.\d+)?\b|\bpriced?\s+(at|of|is)\b|\bthe price\b", re.I)),
+    ("stake", re.compile(r"\bstaking\b|\bstake\s+(size|sizing|on|it|this|that)\b|\bunits?\s+staked\b|\b\d+(\.\d+)?\s?u\b", re.I)),
+    ("punt", re.compile(r"\bpunt(s|er|ers|ing)?\b", re.I)),
+    ("tip", re.compile(r"\btipsters?\b|\b(hot|free|our|daily)\s+tips?\b", re.I)),
+    ("value", re.compile(r"\b(best|good|great|real|clear|cleaner|strong|solid|huge|big)\s+value\b|\bvalue\s+(bet|bets|pick|picks|play|selection|angle|spot)\b", re.I)),
+    ("edge", re.compile(r"\b(market|price|pricing|betting|value|model)\s+edge\b|\bthe edge (exists|is there|remains)\b", re.I)),
+    ("market", re.compile(r"(?<!transfer\s)\bmarkets?\b", re.I)),
+    # Case-sensitive on purpose, as in BET EYE: "Back Arsenal" but not "came back".
+    ("back", re.compile(r"\bback(ing)?\s+(the\s+)?(over|under|btts|both teams|draw|home side|away side)\b|(^|[.!?]\s+)Back\s+[A-Z]")),
+    ("tradable", re.compile(r"\btradable\b|\btrade (it|this|the)\b", re.I)),
+    ("parlay", re.compile(r"\b(parlays?|accumulators?|accas?|bet ?builders?|multiples?)\b", re.I)),
+    ("banker", re.compile(r"\bbankers?\b|\block of the (day|week)\b|\bsure (thing|win)\b", re.I)),
+    ("guarantee", re.compile(r"\bguarantee(d|s)?\s+(win|wins|winner|result|results|profit|returns?)\b", re.I)),
+    ("payout", re.compile(r"\b(payouts?|profits?|roi|cash ?out|bankroll|returns? on)\b", re.I)),
+]
+# The brand name itself contains "BET" (and so do its bot and link names).
+_BRAND_NAME = re.compile(r"\bbet\s?eye\w*|\bbeteye\w*", re.I)
+
+
+def off_brand_language(text: str) -> list[str]:
+    """The betting-language checks this text trips (empty when it is on-brand)."""
+    cleaned = _BRAND_NAME.sub(" ", text or "")
+    return [label for label, pattern in _OFF_BRAND_PATTERNS if pattern.search(cleaned)]
 
 
 def is_opt_out(text: str) -> bool:

@@ -1,5 +1,5 @@
 """
-One-shot setup of BetEye's starter listening campaigns, built from the team's curated phrase list.
+One-shot setup of BET EYE's starter listening campaigns, built from the team's curated phrase list.
 
 The $12/month plan: two campaigns get the budget ($6 each, 10 posts per search, every
 30 minutes, paced evenly through the month); the other three are seeded with a $0 budget
@@ -7,11 +7,17 @@ so they can't spend until someone gives them one on the Listening page.
 
 Everything is created paused, and every template is created unapproved: replies only draft
 once a template has an ARCON certificate number (Listening page -> Templates). Safe to re-run:
-campaigns and templates that already exist (by name) are left untouched.
+campaigns and templates that already exist (by name) are left untouched, unless --update-copy
+is passed: then seeded templates whose wording changed here take the new wording and lose any
+approval (an ARCON number covers the exact text), so they need approving again.
+
+Copy follows BET EYE's brand voice: the name is "BET EYE", results are "hits" and "misses",
+no betting language (checked by validate_template), and the footer is "18+ · For information only".
 
 Usage (inside the backend container, after the owner has signed in once):
     python seed_beteye_listening.py --owner you@example.com
     python seed_beteye_listening.py --dry-run          # print the queries, touch nothing
+    python seed_beteye_listening.py --update-copy      # also reword existing seeded templates
 """
 import argparse
 import asyncio
@@ -31,12 +37,18 @@ SIGNUP_LINK = "https://t.me/Beteyebot/BETEYE"
 # Dropped at X, so they're never billed; the full harm and age checks still run on everything else.
 # Tipster adverts and bet-slip screenshots almost always carry a link or an image.
 EXCLUDE = ' -is:retweet -has:links -has:media -addicted -"lost everything"'
-FOOTER = "\n\n18+ · Play responsibly"
+FOOTER = "\n\n18+ · For information only"
+# Every claim here has to stand up to ARCON vetting, so keep them to what BET EYE can show:
+# - "free plan": Freemium is $0 but gives 1 delayed alert a day, so never "free live alerts".
+# - "last 30 days of results are public": beteye.live/proof lists finished alerts from 30 days only.
+# - "red cards": the card alert is the red-card ping; there is no yellow-card alert.
+RESULTS = "The last 30 days of results are public, misses included."
+CTA = "Start on the free plan: {link}"
 
 PROOF_TEMPLATE = {
     "name": "Live proof",
     "intent": "seeking_live_alerts",
-    "body": "BetEye flagged a {alert_type} at {minute}' in {match}, and it {outcome}.\n\nFree live alerts on Telegram: {link}" + FOOTER,
+    "body": "BET EYE flagged a {alert_type} at {minute}' in {match}, and it {outcome}.\n\nLive match alerts on Telegram. " + CTA + FOOTER,
 }
 
 # The two funded campaigns' daily caps add up to 30 (the spec's 30 per X account per day).
@@ -55,7 +67,7 @@ CAMPAIGNS = [
         "templates": [
             PROOF_TEMPLATE,
             {"name": "Live, no proof", "intent": "any",
-             "body": "BetEye sends live match alerts on Telegram when a game shifts: goals, cards, corners. Every result is published, misses included.\n\nTry it free: {link}" + FOOTER},
+             "body": "BET EYE sends live match alerts on Telegram when a game shifts: goals, red cards, corners. " + RESULTS + "\n\n" + CTA + FOOTER},
         ],
     },
     {
@@ -70,7 +82,7 @@ CAMPAIGNS = [
         "templates": [
             PROOF_TEMPLATE,
             {"name": "Goals, no proof", "intent": "any",
-             "body": "BetEye watches live games for goal and corner pressure and sends an alert on Telegram when it builds. Every result is published, misses included.\n\nFree: {link}" + FOOTER},
+             "body": "BET EYE watches live games for goal and corner pressure and sends an alert on Telegram when it builds. " + RESULTS + "\n\n" + CTA + FOOTER},
         ],
     },
     {
@@ -86,7 +98,7 @@ CAMPAIGNS = [
         ],
         "templates": [
             {"name": "App pitch", "intent": "any",
-             "body": "BetEye is a free Telegram app that sends live football alerts from match data, and every alert's result is published, misses included.\n\nHave a look: {link}" + FOOTER},
+             "body": "BET EYE is a live football intelligence app for sports fans: live match alerts on Telegram, built from match data. " + RESULTS + "\n\n" + CTA + FOOTER},
         ],
     },
     {
@@ -105,7 +117,7 @@ CAMPAIGNS = [
         "templates": [
             PROOF_TEMPLATE,
             {"name": "Nigeria, no proof", "intent": "any",
-             "body": "BetEye sends free live alerts on Telegram when a match turns: goals, cards, corners. Every result is published, wins and misses.\n\n{link}" + FOOTER},
+             "body": "BET EYE sends live alerts on Telegram when a match turns: goals, red cards, corners. The last 30 days of results are public, hits and misses.\n\n" + CTA + FOOTER},
         ],
     },
     {
@@ -123,7 +135,7 @@ CAMPAIGNS = [
         ],
         "templates": [
             {"name": "Live, not pre-match", "intent": "any",
-             "body": "BetEye's alerts are live, not pre-match picks: it flags when a game shifts, and every result is published, misses included.\n\nFree on Telegram: {link}" + FOOTER},
+             "body": "BET EYE's alerts fire during the match, when a game shifts. " + RESULTS + "\n\nAlerts on Telegram. " + CTA + FOOTER},
         ],
     },
 ]
@@ -145,7 +157,7 @@ def check_presets() -> list[str]:
     return problems
 
 
-async def seed(owner_email: str) -> None:
+async def seed(owner_email: str, update_copy: bool = False) -> None:
     # Say where this is writing: the Listening page only shows campaigns from the
     # database the deployed backend uses.
     url = make_url(settings.DATABASE_URL)
@@ -157,6 +169,7 @@ async def seed(owner_email: str) -> None:
         if not owner or not owner.is_admin:
             sys.exit(f"{owner_email} must be an admin who has signed in to Voxly at least once.")
 
+        needs_approval: list[str] = []
         for c in CAMPAIGNS:
             campaign = (await db.execute(
                 select(ListeningCampaign).where(ListeningCampaign.name == c["name"])
@@ -171,15 +184,25 @@ async def seed(owner_email: str) -> None:
                 )
                 db.add(campaign)
                 await db.flush()
-            existing = set((await db.execute(
-                select(OutreachTemplate.name).where(OutreachTemplate.campaign_id == campaign.id)
-            )).scalars())
+            existing = {t.name: t for t in (await db.execute(
+                select(OutreachTemplate).where(OutreachTemplate.campaign_id == campaign.id)
+            )).scalars()}
             new_templates = [t for t in c["templates"] if t["name"] not in existing]
             for t in new_templates:
                 db.add(OutreachTemplate(campaign_id=campaign.id, name=t["name"], intent=t["intent"], body=t["body"]))
+            reworded = [t for t in c["templates"] if t["name"] in existing and existing[t["name"]].body != t["body"]]
+            if update_copy:
+                for t in reworded:
+                    row = existing[t["name"]]
+                    if row.approved_at:
+                        needs_approval.append(f'{c["name"]} / {t["name"]} (was approved as {row.arcon_cert_no})')
+                    row.body, row.arcon_cert_no, row.approved_at = t["body"], None, None
             print(f'{"created" if created else "exists "}  {c["name"]:<32} {len(c["phrases"]):>2} phrases  '
-                  f'{len(campaign.x_query):>3} chars  +{len(new_templates)} templates')
+                  f'{len(campaign.x_query):>3} chars  +{len(new_templates)} templates'
+                  + (f'  {len(reworded)} {"reworded" if update_copy else "with old wording (pass --update-copy)"}' if reworded else ''))
         await db.commit()
+    if needs_approval:
+        print("\nThese were approved but have new wording, so they need a new ARCON number:\n  " + "\n  ".join(needs_approval))
     print("\nAll campaigns are paused and all templates unapproved. Two have a $6 budget; the rest $0."
           "\nNext: Listening page -> Check volume, add each template's ARCON certificate number, then activate.")
 
@@ -189,6 +212,8 @@ def main() -> None:
     parser.add_argument("--owner", default=(settings.ADMIN_EMAILS.split(",")[0].strip() or None),
                         help="admin email that owns the campaigns (default: first of ADMIN_EMAILS)")
     parser.add_argument("--dry-run", action="store_true", help="print the queries and stop")
+    parser.add_argument("--update-copy", action="store_true",
+                        help="reword existing seeded templates to the copy here (clears their approval)")
     args = parser.parse_args()
 
     problems = check_presets()
@@ -201,7 +226,7 @@ def main() -> None:
         return
     if not args.owner:
         sys.exit("Pass --owner you@example.com (or set ADMIN_EMAILS).")
-    asyncio.run(seed(args.owner))
+    asyncio.run(seed(args.owner, update_copy=args.update_copy))
 
 
 if __name__ == "__main__":
