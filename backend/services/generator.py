@@ -3,6 +3,13 @@ from core.config import settings
 from services.llm import llm_complete
 from services.formatter import format_content, sanitize_body, space_paragraphs, FormattedContent
 
+# X posts carry no emojis by default. A persona whose own voice uses them, or a
+# source whose writing brief asks for them, gets a few.
+_X_EMOJI_RULE = (
+    "No emojis on Twitter/X unless the persona's voice or the source material's "
+    "writing brief asks for them, then 1-3 at most"
+)
+
 # How X posts are laid out: short paragraphs, each followed by an empty line.
 X_FORMAT_TEMPLATE = (
     "FORMAT TEMPLATE (X):\n"
@@ -29,7 +36,8 @@ PLATFORM_INSTRUCTIONS = {
         "Long-form: up to 2,500 characters. Articles: up to 3,000 characters. "
         "Follow the FORMAT TEMPLATE below exactly — structure, line breaks, and length. "
         "Every fact must be traceable to the source material. No invented context. "
-        "Plain text only — no emojis, no hashtags, no markdown symbols like * or **. "
+        "Plain text only — no hashtags, no markdown symbols like * or **. "
+        f"{_X_EMOJI_RULE}. "
         "NEVER mention a media outlet, publication, or website by name. "
         "NEVER ask a question. Declarative statements only. Never start with 'I'.\n\n"
         + X_FORMAT_TEMPLATE
@@ -94,7 +102,7 @@ def _build_system_prompt(platform: str, persona_context: str) -> str:
         "- Never use filler phrases like 'In today's world', 'It's important to note', or 'Dive into'\n"
         "- Be specific — cite numbers and examples from the SOURCE MATERIAL provided; never invent them\n"
         "- Write like a human, not a marketing bot\n"
-        "- No emojis on Twitter/X. On other platforms use at most 1-2 only when they add real meaning\n"
+        f"- {_X_EMOJI_RULE}. On other platforms use at most 1-2 only when they add real meaning\n"
         "- Always return valid JSON as instructed\n\n"
         "ACCURACY RULES — never break these:\n"
         "- Every specific statistic, percentage, date, or figure must come from the SOURCE MATERIAL\n"
@@ -227,7 +235,7 @@ async def generate_for_all_platforms(
         f"User persona:\n{persona_context or 'Not specified.'}\n\n"
         "Rules: each platform version must feel native, not copy-pasted. "
         "Match each platform's tone, format, and length expectations exactly. "
-        "No emojis on Twitter/X. Other platforms: at most 1-2 emojis, only when they add meaning.\n\n"
+        f"{_X_EMOJI_RULE}. Other platforms: at most 1-2 emojis, only when they add meaning.\n\n"
         "STYLE RULES:\n"
         "- Never use em-dashes (—) or en-dashes (–). Use a comma, period, or plain hyphen instead\n"
         "- Never use double hyphens (--)\n"
@@ -414,7 +422,7 @@ async def adapt_to_platform(
         "- Add platform-appropriate elements (hashtags for Instagram, numbered tweets for Twitter threads, etc.)\n"
         "- Never use filler phrases\n"
         "- Write like a human, not a marketing bot\n"
-        "- No emojis on Twitter/X. Other platforms: at most 1-2, only when they add real meaning\n"
+        f"- {_X_EMOJI_RULE}. Other platforms: at most 1-2, only when they add real meaning\n"
         "- Never use em-dashes (—) or en-dashes (–). Use a comma, period, or plain hyphen instead\n"
         "- Always return valid JSON as instructed"
     )

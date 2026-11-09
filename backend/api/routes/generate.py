@@ -154,6 +154,12 @@ async def generate(body: GenerateRequest, current_user: CurrentUser, db: DB):
         return {"content_type": body.content_type, "results": [_serialize(record)]}
 
 
+# How much of a source reaches the writer. Callers like BET EYE send a facts
+# block followed by a writing brief (2,400-3,300 characters); the old 2,000 cap
+# cut the brief's voice and length rules off.
+SOURCE_CHARS = 6000
+
+
 @router.post("/from-source")
 async def generate_from_source(
     current_user: CurrentUser,
@@ -196,7 +202,7 @@ async def generate_from_source(
             topic=topic_name,
             platform=platform,
             persona_context=persona_context,
-            sentiment_context=f"Reference content:\n{source_text[:2000]}",
+            sentiment_context=f"Reference content:\n{source_text[:SOURCE_CHARS]}",
             count=3,
         )
         records = []
@@ -223,7 +229,7 @@ async def generate_from_source(
             platform=platform,
             content_type=content_type,
             persona_context=persona_context,
-            sentiment_context=f"Reference content:\n{source_text[:2000]}",
+            sentiment_context=f"Reference content:\n{source_text[:SOURCE_CHARS]}",
         )
         record = GeneratedContent(
             user_id=current_user.id,
