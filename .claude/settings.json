@@ -20,7 +20,19 @@
       "WebFetch(domain:marketingedge.com.ng)",
       "Bash(curl -s https://pypi.org/pypi/pip/json)",
       "Bash(python3 -c ' *)",
-      "mcp__claude_ai_Claude_Docs__create"
+      "mcp__claude_ai_Claude_Docs__create",
+      "Bash(curl -s --max-time 15 \"https://publish.twitter.com/oembed?url=https://x.com/WizardOddsShow/status/2120001894886367696&omit_script=1\")",
+      "Bash(python3 -c 'import json,sys,re,html; d=json.load\\(sys.stdin\\); print\\(d.get\\(\"author_name\"\\), \"|\", d.get\\(\"author_url\"\\)\\); print\\(html.unescape\\(re.sub\\(r\"<[^>]+>\",\" \",d.get\\(\"html\",\"\"\\)\\)\\).strip\\(\\)\\)')",
+      "Bash(curl -s --max-time 15 -o /dev/null -w \"oembed %{http_code}\\\\n\" \"https://publish.twitter.com/oembed?url=https://x.com/WizardOddsShow/status/2120001894886367696\")",
+      "Bash(curl -s --max-time 15 \"https://cdn.syndication.twimg.com/tweet-result?id=2120001894886367696&token=a&lang=en\")",
+      "Bash(python3 -c 'import json,sys; d=json.load\\(sys.stdin\\); print\\(d.get\\(\"user\",{}\\).get\\(\"name\"\\), \"@\"+d.get\\(\"user\",{}\\).get\\(\"screen_name\",\"\"\\), \"|\", d.get\\(\"user\",{}\\).get\\(\"description\",\"\"\\)\\); print\\(\"TEXT:\", d.get\\(\"text\"\\)\\); q=d.get\\(\"quoted_tweet\"\\) or {}; print\\(\"QUOTED:\", q.get\\(\"text\"\\)\\); p=d.get\\(\"parent\"\\) or {}; print\\(\"PARENT:\", p.get\\(\"text\"\\)\\)')",
+      "Bash(/usr/bin/grep -rn \"no_approved_template\\\\|not_relevant\\\\|drop_reason\\\\|low_confidence\" frontend/app frontend/lib backend/api)",
+      "Bash(/usr/bin/grep -c . backend/.env)",
+      "Bash(/usr/bin/grep -oE \"^\\(GROQ_API_KEY|GEMINI_API_KEY|OPENAI_API_KEY\\)=.+\" backend/.env)",
+      "Bash(/usr/bin/grep -n \"class ListeningCampaign\\\\|class OutreachTemplate\" -A22 db/models/listening.py)",
+      "Bash(/usr/bin/grep -E \"Mapped|class \")",
+      "Bash(/usr/bin/grep -n \"async def search_recent\\\\|async def users_by_ids\" -A3 services/x_api.py)",
+      "Bash(/usr/bin/grep -n \"async def find_proof\" -A8 services/listening/receipts.py)"
     ]
   }
 }

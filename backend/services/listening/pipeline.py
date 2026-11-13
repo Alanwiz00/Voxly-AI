@@ -16,7 +16,7 @@ from db.models.listening import (
 )
 from services.listening.classifier import classify_post
 from services.listening.drafter import build_link, check_draft, new_code, pick_template, render
-from services.listening.filters import age_signals, harm_signals, is_opt_out, matched_query_terms
+from services.listening.filters import age_signals, harm_signals, is_opt_out, matched_query_terms, not_football_signals
 from services.listening.receipts import find_proof
 from services.x_api import XApiError, XClient
 
@@ -130,6 +130,8 @@ async def poll_campaign(db: AsyncSession, campaign: ListeningCampaign, x_client:
             _drop(c, "harm_words")
         elif age_signals(c.text):
             _drop(c, "age_words")
+        elif not_football_signals(c.text):
+            _drop(c, "not_football")
         elif c.x_author_id in blocked:
             _drop(c, blocked[c.x_author_id])
         else:

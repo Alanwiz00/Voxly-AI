@@ -29,6 +29,34 @@ AGE_TERMS = [
 ]
 _AGE_PATTERN = re.compile(r"\b(1[0-7])\s*(?:yo|y/o|yrs?|years?\s*old)\b|\bi'?m\s*(1[0-7])\b|\bage\s*(1[0-7])\b")
 
+# BET EYE covers association football (soccer) only. A post naming another sport, or
+# something else people "predict" on, is dropped before the AI check unless it also
+# names soccer. "Football" alone proves nothing: "Monday Night Football" is the NFL.
+OTHER_SPORT_TERMS = [
+    # American football
+    "nfl", "ncaaf", "cfb", "college football", "monday night football", "thursday night football",
+    "sunday night football", "mnf", "tnf", "snf", "super bowl", "touchdown", "touchdowns", "quarterback", "qb",
+    # basketball, baseball, hockey
+    "nba", "wnba", "ncaab", "march madness", "basketball", "euroleague", "mlb", "baseball", "home run",
+    "home runs", "nhl", "hockey",
+    # everything else
+    "tennis", "atp", "wta", "wimbledon", "cricket", "ipl", "wicket", "wickets", "ufc", "mma", "boxing",
+    "formula 1", "f1", "nascar", "motogp", "horse racing", "greyhound", "greyhounds", "golf", "pga", "rugby",
+    "nrl", "darts", "snooker", "volleyball", "handball", "table tennis", "esports", "cs2", "dota", "valorant",
+    "crypto", "bitcoin", "btc", "forex", "memecoin", "polymarket", "kalshi", "election",
+]
+# Quarters and point spreads belong to American football and basketball, not soccer.
+_OTHER_SPORT_PATTERN = re.compile(
+    r"\b(1st|2nd|3rd|4th|first|second|third|fourth)[- ]?(quarter|qtr|q)\b|\bq[1-4]\b"
+    r"|\bpoint spread\b|\bagainst the spread\b|\bats\b"
+)
+# Any of these keeps a post for the AI check even if it also names another sport.
+SOCCER_TERMS = [
+    "soccer", "premier league", "epl", "la liga", "laliga", "serie a", "bundesliga", "ligue 1",
+    "champions league", "ucl", "europa league", "conference league", "fa cup", "carabao cup", "npfl",
+    "afcon", "caf", "mls", "eredivisie", "btts", "both teams to score", "clean sheet", "boxing day",
+]
+
 BANNED_CLAIMS = [
     "sure win", "sure odds", "sure banker", "guaranteed", "guarantee", "100% win", "100% sure",
     "risk-free", "risk free", "can't lose", "cannot lose", "recover your losses", "recover losses",
@@ -66,6 +94,18 @@ def harm_signals(text: str, extra_terms: list[str] | None = None) -> list[str]:
 def age_signals(text: str) -> list[str]:
     hits = find_terms(text, AGE_TERMS)
     match = _AGE_PATTERN.search(_normalise(text))
+    if match:
+        hits.append(match.group(0))
+    return hits
+
+
+def not_football_signals(text: str) -> list[str]:
+    """Signs a post is about another sport (or crypto, elections) rather than soccer.
+    Empty when the post also names soccer: the AI check then decides."""
+    if find_terms(text, SOCCER_TERMS):
+        return []
+    hits = find_terms(text, OTHER_SPORT_TERMS)
+    match = _OTHER_SPORT_PATTERN.search(_normalise(text))
     if match:
         hits.append(match.group(0))
     return hits
